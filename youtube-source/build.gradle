@@ -1,0 +1,34 @@
+/*
+ * youtube-source — a standalone, low-latency YouTube audio resolver.
+ *
+ * This is a plain Java library: it has no dependency on JDA or on the bot. It
+ * takes a query (URL or search term) and returns a directly-playable stream
+ * reference. The bot's `app` module consumes it; nothing here consumes the bot.
+ */
+plugins {
+    id 'java-library'
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    // Jackson is exposed on the API surface only via internal parsing; kept `api`
+    // so the test source set and any future consumer share one resolved version.
+    api libs.jackson.databind
+    implementation libs.slf4j.api
+
+    testImplementation libs.junit.jupiter
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(25)
+    }
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+}

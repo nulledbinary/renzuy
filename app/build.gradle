@@ -1,0 +1,40 @@
+plugins {
+    id 'application'
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation project(':youtube-source')
+
+    implementation libs.jda
+    implementation libs.jdave.api
+    runtimeOnly libs.jdave.natives.win
+    implementation libs.slf4j.simple
+
+    testImplementation libs.junit.jupiter
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(25)
+    }
+}
+
+application {
+    mainClass = 'renzuy.Bot'
+    // jdave uses the Foreign Function & Memory API to load libdave natives.
+    applicationDefaultJvmArgs = ['--enable-native-access=ALL-UNNAMED']
+}
+
+tasks.named('run') {
+    standardInput = System.in
+    workingDir = rootProject.projectDir
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+}

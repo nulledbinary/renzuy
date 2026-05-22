@@ -1,0 +1,15 @@
+[versions]
+jda = "6.4.1"
+jdave = "0.1.7"
+slf4j = "2.0.16"
+jackson = "2.18.2"
+junit-jupiter = "5.12.1"
+
+[libraries]
+jda = { module = "net.dv8tion:JDA", version.ref = "jda" }
+jdave-api = { module = "club.minnced:jdave-api", version.ref = "jdave" }
+jdave-natives-win = { module = "club.minnced:jdave-native-win-x86-64", version.ref = "jdave" }
+slf4j-simple = { module = "org.slf4j:slf4j-simple", version.ref = "slf4j" }
+slf4j-api = { module = "org.slf4j:slf4j-api", version.ref = "slf4j" }
+jackson-databind = { module = "com.fasterxml.jackson.core:jackson-databind", version.ref = "jackson" }
+junit-jupiter = { module = "org.junit.jupiter:junit-jupiter", version.ref = "junit-jupiter" }
