@@ -34,19 +34,15 @@ public final class YtDlpFallback {
     private static final long FALLBACK_URL_TTL_MILLIS = 30L * 60L * 1000L;
 
     /**
-     * Tells yt-dlp which Innertube clients to ask. The {@code web} and {@code android}
-     * clients have started demanding a GVS PoToken (and the bot-detection wall) when
-     * the request comes from a datacenter IP (AWS, GCP, ...). The clients here have
-     * historically replied to anonymous requests from cloud IPs without demanding
-     * cookies or a PoToken; {@code tv} (the Smart TV YouTube app) has been the most
-     * resilient through 2025–2026, with {@code tv_embedded} and {@code android_vr}
-     * (Oculus) as backups. Order matters — yt-dlp tries them left-to-right.
-     *
-     * <p>If even these trip the wall (it happens for some videos / from some egress
-     * IPs), set {@code YT_DLP_COOKIES} so yt-dlp can present an authenticated session.
+     * Tells yt-dlp which Innertube clients to ask. Default web/tv clients increasingly
+     * trip YouTube's "Sign in to confirm you're not a bot" wall when the request comes
+     * from a datacenter IP (AWS, GCP, ...). The clients here have historically replied
+     * to anonymous requests from cloud IPs without demanding cookies or a PoToken;
+     * {@code mweb} (mobile web) and {@code tv_embedded} have been the most resilient.
+     * Order matters — yt-dlp tries them left-to-right.
      */
     private static final String YOUTUBE_EXTRACTOR_ARGS =
-            "youtube:player_client=tv,tv_embedded,android_vr,mweb";
+            "youtube:player_client=mweb,tv_embedded,android,web";
 
     private final String ytDlpPath;
     private final String cookiesPath;
@@ -157,48 +153,37 @@ public final class YtDlpFallback {
 
     private List<String> command(String target) {
         // One --print per field; yt-dlp emits them as lines in this exact order.
-        List<String> cmd = new ArrayList<>(20);
-        cmd.add(ytDlpPath);
-        cmd.add("--no-playlist");
-        cmd.add("--no-warnings");
-        cmd.add("--quiet");
-        cmd.add("--extractor-args"); cmd.add(YOUTUBE_EXTRACTOR_ARGS);
-        appendCookiesArg(cmd);
-        cmd.add("--print"); cmd.add("title");
-        cmd.add("--print"); cmd.add("url");
-        cmd.add("--print"); cmd.add("duration");
-        cmd.add("--print"); cmd.add("uploader");
-        cmd.add("--print"); cmd.add("webpage_url");
-        cmd.add("--print"); cmd.add("id");
-        cmd.add("--format"); cmd.add("bestaudio/best");
-        cmd.add(target);
-        return cmd;
+        return List.of(
+                ytDlpPath,
+                "--no-playlist",
+                "--no-warnings",
+                "--quiet",
+                "--extractor-args", YOUTUBE_EXTRACTOR_ARGS,
+                "--print", "title",
+                "--print", "url",
+                "--print", "duration",
+                "--print", "uploader",
+                "--print", "webpage_url",
+                "--print", "id",
+                "--format", "bestaudio/best",
+                target);
     }
 
     private List<String> playlistCommand(String playlistUrl) {
         // --flat-playlist makes yt-dlp list entries without resolving each one — fast
         // even for huge playlists. Five --print fields per entry, in fixed order.
-        List<String> cmd = new ArrayList<>(16);
-        cmd.add(ytDlpPath);
-        cmd.add("--flat-playlist");
-        cmd.add("--no-warnings");
-        cmd.add("--quiet");
-        cmd.add("--extractor-args"); cmd.add(YOUTUBE_EXTRACTOR_ARGS);
-        appendCookiesArg(cmd);
-        cmd.add("--print"); cmd.add("id");
-        cmd.add("--print"); cmd.add("title");
-        cmd.add("--print"); cmd.add("duration");
-        cmd.add("--print"); cmd.add("uploader");
-        cmd.add("--print"); cmd.add("webpage_url");
-        cmd.add(playlistUrl);
-        return cmd;
-    }
-
-    private void appendCookiesArg(List<String> cmd) {
-        if (!cookiesPath.isBlank()) {
-            cmd.add("--cookies");
-            cmd.add(cookiesPath);
-        }
+        return List.of(
+                ytDlpPath,
+                "--flat-playlist",
+                "--no-warnings",
+                "--quiet",
+                "--extractor-args", YOUTUBE_EXTRACTOR_ARGS,
+                "--print", "id",
+                "--print", "title",
+                "--print", "duration",
+                "--print", "uploader",
+                "--print", "webpage_url",
+                playlistUrl);
     }
 
     private AudioReference parse(String stdout, String originalQuery) {
