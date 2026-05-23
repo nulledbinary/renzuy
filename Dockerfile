@@ -36,12 +36,16 @@ USER renzuy
 WORKDIR /home/renzuy/app
 
 COPY --from=build --chown=renzuy:renzuy /workspace/app/build/install/app/ ./
+COPY --chown=renzuy:renzuy entrypoint.sh /home/renzuy/app/entrypoint.sh
 
 # A writable home for prefix config (mounted via ECS volumes if persistence is wanted).
+# YT_DLP_COOKIES is the path the entrypoint writes the cookie file to when the
+# YT_DLP_COOKIES_DATA secret is injected by ECS — yt-dlp then reads it via --cookies.
 ENV APP_ENV=production \
     JAVA_TOOL_OPTIONS="--enable-native-access=ALL-UNNAMED" \
-    RENZUY_CONFIG_DIR=/home/renzuy/app/config
+    RENZUY_CONFIG_DIR=/home/renzuy/app/config \
+    YT_DLP_COOKIES=/home/renzuy/app/config/youtube-cookies.txt
 
-RUN mkdir -p /home/renzuy/app/config
+RUN mkdir -p /home/renzuy/app/config && chmod +x /home/renzuy/app/entrypoint.sh
 
-ENTRYPOINT ["./bin/app"]
+ENTRYPOINT ["./entrypoint.sh"]
