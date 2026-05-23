@@ -45,9 +45,15 @@ public final class YtDlpFallback {
             "youtube:player_client=mweb,tv_embedded,android,web";
 
     private final String ytDlpPath;
+    private final String cookiesPath;
 
     public YtDlpFallback(String ytDlpPath) {
+        this(ytDlpPath, "");
+    }
+
+    public YtDlpFallback(String ytDlpPath, String cookiesPath) {
         this.ytDlpPath = ytDlpPath;
+        this.cookiesPath = cookiesPath == null ? "" : cookiesPath;
     }
 
     /**

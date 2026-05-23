@@ -12,6 +12,10 @@ import java.time.Duration;
  * @param cacheMaxEntries hard cap on cache size (a pure latency optimisation)
  * @param fallbackEnabled whether to fall back to yt-dlp when Innertube cannot resolve
  * @param ytDlpPath       path/command for the yt-dlp executable used by the fallback
+ * @param ytDlpCookiesPath path to a Netscape-format cookies file passed to yt-dlp via
+ *                        {@code --cookies}; blank/null disables. Required on datacenter
+ *                        IPs (Fargate) for videos that hit the "Sign in to confirm
+ *                        you're not a bot" wall.
  * @param verifyStreamUrl probe the chosen CDN URL with a 1-byte ranged GET before
  *                        returning it — costs one short round trip, but guarantees
  *                        the bot never starts ffmpeg against a dead URL
@@ -24,6 +28,7 @@ public record YoutubeSourceOptions(
         int cacheMaxEntries,
         boolean fallbackEnabled,
         String ytDlpPath,
+        String ytDlpCookiesPath,
         boolean verifyStreamUrl,
         boolean prewarmOnStart) {
 
@@ -43,6 +48,7 @@ public record YoutubeSourceOptions(
         private int cacheMaxEntries = 512;
         private boolean fallbackEnabled = true;
         private String ytDlpPath = "yt-dlp";
+        private String ytDlpCookiesPath = "";
         private boolean verifyStreamUrl = true;
         private boolean prewarmOnStart = true;
 
@@ -52,13 +58,14 @@ public record YoutubeSourceOptions(
         public Builder cacheMaxEntries(int v) { this.cacheMaxEntries = v; return this; }
         public Builder fallbackEnabled(boolean v) { this.fallbackEnabled = v; return this; }
         public Builder ytDlpPath(String v) { this.ytDlpPath = v; return this; }
+        public Builder ytDlpCookiesPath(String v) { this.ytDlpCookiesPath = v == null ? "" : v; return this; }
         public Builder verifyStreamUrl(boolean v) { this.verifyStreamUrl = v; return this; }
         public Builder prewarmOnStart(boolean v) { this.prewarmOnStart = v; return this; }
 
         public YoutubeSourceOptions build() {
             return new YoutubeSourceOptions(
                     connectTimeout, requestTimeout, cacheTtl, cacheMaxEntries,
-                    fallbackEnabled, ytDlpPath, verifyStreamUrl, prewarmOnStart);
+                    fallbackEnabled, ytDlpPath, ytDlpCookiesPath, verifyStreamUrl, prewarmOnStart);
         }
     }
 }
