@@ -11,7 +11,10 @@ dependencies {
 
     implementation libs.jda
     implementation libs.jdave.api
+    // Ship both platform natives; jdave picks the right one at runtime via os.name.
+    // Windows is for local dev, Linux is for the ECS / Docker production image.
     runtimeOnly libs.jdave.natives.win
+    runtimeOnly libs.jdave.natives.linux
     implementation libs.slf4j.simple
 
     testImplementation libs.junit.jupiter

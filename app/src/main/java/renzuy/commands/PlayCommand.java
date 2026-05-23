@@ -4,17 +4,21 @@ import java.io.IOException;
 import net.dv8tion.jda.api.entities.Guild;
 import net.dv8tion.jda.api.entities.GuildVoiceState;
 import net.dv8tion.jda.api.entities.Member;
+import net.dv8tion.jda.api.entities.MessageEmbed;
 import net.dv8tion.jda.api.entities.channel.middleman.AudioChannel;
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent;
+import net.dv8tion.jda.api.events.message.MessageReceivedEvent;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
 import net.dv8tion.jda.api.interactions.commands.OptionMapping;
 import org.jetbrains.annotations.NotNull;
 import renzuy.audio.GuildAudioPlayer;
 import renzuy.audio.MusicService;
-import renzuy.youtube.AudioReference;
+import renzuy.commands.text.TextCommand;
+import renzuy.ui.Embeds;
+import renzuy.youtube.ResolveResult;
 import renzuy.youtube.YoutubeSourceException;
 
-public final class PlayCommand extends ListenerAdapter {
+public final class PlayCommand extends ListenerAdapter implements TextCommand {
 
     public static final String NAME = "play";
     public static final String QUERY_OPTION = "query";
@@ -26,69 +30,96 @@ public final class PlayCommand extends ListenerAdapter {
     }
 
     @Override
+    public String name() {
+        return NAME;
+    }
+
+    @Override
     public void onSlashCommandInteraction(@NotNull SlashCommandInteractionEvent event) {
-        if (!event.getName().equals(NAME)) {
-            return;
-        }
+        if (!event.getName().equals(NAME)) return;
 
         Guild guild = event.getGuild();
         if (guild == null) {
-            event.reply("This command can only be used in a server.").setEphemeral(true).queue();
+            event.replyEmbeds(Embeds.warn("This command can only be used in a server."))
+                    .setEphemeral(true).queue();
             return;
         }
-
-        Member member = event.getMember();
-        GuildVoiceState voiceState = member != null ? member.getVoiceState() : null;
-        AudioChannel voiceChannel = voiceState != null ? voiceState.getChannel() : null;
-        if (voiceChannel == null) {
-            event.reply("Join a voice channel first.").setEphemeral(true).queue();
+        AudioChannel voice = voiceChannelOf(event.getMember());
+        if (voice == null) {
+            event.replyEmbeds(Embeds.warn("Join a voice channel first.")).setEphemeral(true).queue();
             return;
         }
-
-        OptionMapping queryOption = event.getOption(QUERY_OPTION);
-        String query = queryOption != null ? queryOption.getAsString().trim() : "";
+        OptionMapping option = event.getOption(QUERY_OPTION);
+        String query = option != null ? option.getAsString().trim() : "";
         if (query.isEmpty()) {
-            event.reply("You must provide a YouTube URL or a search term.")
+            event.replyEmbeds(Embeds.warn("You must provide a YouTube URL or a search term."))
                     .setEphemeral(true).queue();
             return;
         }
 
-        event.deferReply().queue();
+        event.deferReply(true).queue();
+        start(guild, voice, query, embed -> event.getHook().editOriginalEmbeds(embed).queue());
+    }
 
-        GuildAudioPlayer player = music.getOrCreate(guild);
-
-        try {
-            guild.getAudioManager().openAudioConnection(voiceChannel);
-        } catch (Exception e) {
-            event.getHook().sendMessage("Could not join voice channel: " + e.getMessage()).queue();
+    @Override
+    public void execute(MessageReceivedEvent event, String args) {
+        Guild guild = event.getGuild();
+        AudioChannel voice = voiceChannelOf(event.getMember());
+        if (voice == null) {
+            event.getChannel().sendMessageEmbeds(Embeds.warn("Join a voice channel first.")).queue();
             return;
         }
+        if (args.isEmpty()) {
+            event.getChannel().sendMessageEmbeds(
+                    Embeds.warn("Provide a YouTube URL, a playlist URL, or a search term.")).queue();
+            return;
+        }
+        start(guild, voice, args, embed -> event.getChannel().sendMessageEmbeds(embed).queue());
+    }
 
-        // Resolution can block (warm HTTP request, or a yt-dlp subprocess on the
-        // fallback path) — keep it off the JDA event thread.
-        Thread worker = new Thread(() -> resolveAndQueue(event, player, query), "play-resolver");
+    private static AudioChannel voiceChannelOf(Member member) {
+        GuildVoiceState state = member != null ? member.getVoiceState() : null;
+        return state != null ? state.getChannel() : null;
+    }
+
+    private void start(Guild guild, AudioChannel voice, String query, java.util.function.Consumer<MessageEmbed> reply) {
+        GuildAudioPlayer player = music.getOrCreate(guild);
+        try {
+            guild.getAudioManager().openAudioConnection(voice);
+        } catch (Exception e) {
+            reply.accept(Embeds.error("Could not join voice channel: " + e.getMessage()));
+            return;
+        }
+        Thread worker = new Thread(() -> resolveAndQueue(player, query, reply), "play-resolver");
         worker.setDaemon(true);
         worker.start();
     }
 
-    private void resolveAndQueue(SlashCommandInteractionEvent event, GuildAudioPlayer player, String query) {
-        AudioReference track;
+    private void resolveAndQueue(GuildAudioPlayer player, String query, java.util.function.Consumer<MessageEmbed> reply) {
+        ResolveResult result;
         try {
-            track = music.getSource().resolve(query);
+            result = music.getSource().resolve(query);
         } catch (YoutubeSourceException e) {
-            event.getHook().sendMessage("Could not resolve: " + e.getMessage()).queue();
+            reply.accept(Embeds.error("Could not resolve: " + e.getMessage()));
             return;
         }
-
         boolean startedNow;
         try {
-            startedNow = player.enqueue(track);
+            startedNow = player.enqueueAll(result.tracks());
         } catch (IOException e) {
-            event.getHook().sendMessage("Could not start playback: " + e.getMessage()).queue();
+            reply.accept(Embeds.error("Could not start playback: " + e.getMessage()));
             return;
         }
-
-        String prefix = startedNow ? "Now playing: " : "Queued: ";
-        event.getHook().sendMessage(prefix + "**" + track.title() + "**").queue();
+        String firstTitle = result.first().title();
+        if (result.isPlaylist()) {
+            int firstPosition = startedNow ? 0
+                    : Math.max(player.pendingTracks().size() - (result.tracks().size() - 1), 1);
+            reply.accept(Embeds.playlistQueued(result.playlistTitle(), result.tracks().size(),
+                    firstTitle, startedNow, firstPosition));
+        } else if (startedNow) {
+            reply.accept(Embeds.playing(firstTitle));
+        } else {
+            reply.accept(Embeds.queued(firstTitle, player.pendingTracks().size()));
+        }
     }
 }

@@ -1,0 +1,73 @@
+name: Deploy to AWS ECS
+
+# Only ever runs on main. Feature branches and `development` never touch AWS.
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ecs-deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  AWS_REGION:    ${{ vars.AWS_REGION }}
+  ECR_REPO:      ${{ vars.ECR_REPO }}        # e.g. renzuy-bot
+  ECS_CLUSTER:   ${{ vars.ECS_CLUSTER }}     # e.g. renzuy-cluster
+  ECS_SERVICE:   ${{ vars.ECS_SERVICE }}     # e.g. renzuy-bot
+  ECS_TASK_DEF:  ${{ vars.ECS_TASK_DEF }}    # e.g. renzuy-bot-task
+  CONTAINER_NAME: renzuy-bot
+
+permissions:
+  id-token: write   # required for OIDC auth to AWS
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Log in to Amazon ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build & push image
+        id: image
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+        run: |
+          IMAGE="$REGISTRY/$ECR_REPO:${GITHUB_SHA}"
+          IMAGE_LATEST="$REGISTRY/$ECR_REPO:latest"
+          docker build -t "$IMAGE" -t "$IMAGE_LATEST" .
+          docker push "$IMAGE"
+          docker push "$IMAGE_LATEST"
+          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+
+      - name: Pull current task definition
+        id: taskdef
+        run: |
+          aws ecs describe-task-definition \
+            --task-definition "$ECS_TASK_DEF" \
+            --query taskDefinition > task-def.json
+
+      - name: Splice in new image
+        id: render
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: task-def.json
+          container-name: ${{ env.CONTAINER_NAME }}
+          image: ${{ steps.image.outputs.image }}
+
+      - name: Deploy to ECS
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.render.outputs.task-definition }}
+          service:         ${{ env.ECS_SERVICE }}
+          cluster:         ${{ env.ECS_CLUSTER }}
+          wait-for-service-stability: true

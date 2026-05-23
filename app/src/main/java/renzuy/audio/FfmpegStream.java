@@ -39,8 +39,11 @@ public final class FfmpegStream implements AutoCloseable {
                 "-probesize", "65536",
                 "-analyzeduration", "0",
                 // Send the User-Agent the CDN URL was issued for, then stay resilient
-                // to transient network drops mid-stream.
+                // to transient network drops mid-stream. `-icy 0` suppresses ffmpeg's
+                // default Icy-MetaData request header, which some googlevideo edges
+                // treat as a non-client request and 403.
                 "-user_agent", agent,
+                "-icy", "0",
                 "-reconnect", "1",
                 "-reconnect_streamed", "1",
                 "-reconnect_delay_max", "5",

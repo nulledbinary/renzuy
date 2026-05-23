@@ -5,6 +5,16 @@
 build
 .vscode/
 tools/
+deploy/
+
+# Eclipse / VSCode-Java auto-generated output dirs
+bin/
+app/bin/
+youtube-source/bin/
+
+# Local screenshots / mockups
+Emphermal.png
+Ephemeral.png
 
 # Local secrets / env files
 .env

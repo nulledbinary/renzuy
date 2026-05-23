@@ -32,7 +32,7 @@ public final class MusicService {
 
     public GuildAudioPlayer getOrCreate(Guild guild) {
         return players.computeIfAbsent(guild.getIdLong(), id -> {
-            GuildAudioPlayer player = new GuildAudioPlayer();
+            GuildAudioPlayer player = new GuildAudioPlayer(source::resolveLazy);
             AudioManager manager = guild.getAudioManager();
             manager.setSendingHandler(new PcmAudioSendHandler(player));
             manager.setConnectionListener(new VoiceConnectionLogger(guild.getName()));

@@ -1,0 +1,27 @@
+version: 0.2
+
+# Builds the renzuy-bot Docker image inside AWS CodeBuild and pushes it to ECR.
+# Triggered by the deploy script with the source uploaded from local as a zip; the
+# project's image (aws/codebuild/standard:7.0) already has Docker + buildx ready.
+
+phases:
+  pre_build:
+    commands:
+      - echo "Logging into ECR ${AWS_DEFAULT_REGION} as ${AWS_ACCOUNT_ID}..."
+      - aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS --password-stdin "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com"
+      - IMAGE_URI="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com/${IMAGE_REPO_NAME}"
+      - IMAGE_TAG="${IMAGE_TAG:-latest}"
+  build:
+    commands:
+      - echo "Building $IMAGE_URI:$IMAGE_TAG"
+      - docker build -t "$IMAGE_URI:$IMAGE_TAG" -t "$IMAGE_URI:latest" .
+  post_build:
+    commands:
+      - echo "Pushing $IMAGE_URI:$IMAGE_TAG and $IMAGE_URI:latest"
+      - docker push "$IMAGE_URI:$IMAGE_TAG"
+      - docker push "$IMAGE_URI:latest"
+      - printf '{"ImageURI":"%s"}' "$IMAGE_URI:$IMAGE_TAG" > imagedefinitions.json
+
+artifacts:
+  files:
+    - imagedefinitions.json

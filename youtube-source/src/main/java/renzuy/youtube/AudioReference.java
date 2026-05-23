@@ -48,4 +48,28 @@ public record AudioReference(
     public boolean isExpired(long atEpochMillis) {
         return expiresAtEpochMillis > 0 && atEpochMillis >= expiresAtEpochMillis;
     }
+
+    /**
+     * @return {@code true} if this reference is a placeholder from a playlist enumeration —
+     *         it has metadata for the queue ("now playing" / `/queue` listing) but no
+     *         stream URL yet, and must be materialized via {@code YoutubeSource.resolveLazy}
+     *         before ffmpeg can consume it.
+     */
+    public boolean isLazy() {
+        return streamUrl == null || streamUrl.isBlank();
+    }
+
+    /**
+     * Builds a lazy placeholder for a playlist entry. The stream URL is empty; the
+     * downstream resolver re-resolves by {@code webpageUrl} (or {@code videoId} for
+     * YouTube entries) right before playback.
+     */
+    public static AudioReference lazy(
+            String title, String author, long durationMillis,
+            String videoId, String webpageUrl) {
+        return new AudioReference(
+                title, author, durationMillis, videoId, webpageUrl,
+                "", "lazy", false, false, "",
+                Origin.YT_DLP, "yt-dlp:flat-playlist", 0L);
+    }
 }

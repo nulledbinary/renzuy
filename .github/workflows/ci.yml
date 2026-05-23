@@ -1,0 +1,30 @@
+name: CI
+
+# Runs only on direct pushes to main. PRs from development (or anywhere else) do
+# NOT trigger this workflow, and pushes to development never run CI either — the
+# deploy workflow likewise only fires on main, so feature branches stay free of
+# CI noise.
+on:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 25
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew
+
+      - name: Build & test
+        run: ./gradlew --no-daemon --no-configuration-cache build
