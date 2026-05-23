@@ -4,18 +4,15 @@ import java.awt.Color;
 import net.dv8tion.jda.api.EmbedBuilder;
 import net.dv8tion.jda.api.entities.MessageEmbed;
 
-/**
- * One-stop builder for the Jockie-style coloured-stripe embeds every command reply uses.
- * Every embed is meant to be sent ephemerally (setEphemeral(true)).
- */
+/** Embed builders for every reply the bot produces. */
 public final class Embeds {
 
-    public static final Color PLAYING = new Color(0x1DB954); // Spotify green
-    public static final Color QUEUED  = new Color(0x5865F2); // Discord blurple
-    public static final Color INFO    = new Color(0x3498DB); // info blue
-    public static final Color SUCCESS = new Color(0x57F287); // Discord green
-    public static final Color WARN    = new Color(0xFEE75C); // Discord yellow
-    public static final Color ERROR   = new Color(0xED4245); // Discord red
+    public static final Color PLAYING = new Color(0x1DB954);
+    public static final Color QUEUED  = new Color(0x5865F2);
+    public static final Color INFO    = new Color(0x3498DB);
+    public static final Color SUCCESS = new Color(0x57F287);
+    public static final Color WARN    = new Color(0xFEE75C);
+    public static final Color ERROR   = new Color(0xED4245);
 
     private static final String PLAY_ICON =
             "https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/25b6.png";
@@ -27,6 +24,10 @@ public final class Embeds {
             "https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/23ed.png";
     private static final String WAVE_ICON =
             "https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f44b.png";
+    private static final String GEAR_ICON =
+            "https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/2699.png";
+    private static final String PERSON_ICON =
+            "https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f464.png";
 
     private Embeds() {}
 
@@ -47,11 +48,6 @@ public final class Embeds {
                 .build();
     }
 
-    /**
-     * Reply for a playlist: announces the playlist as a whole, names the first track
-     * (which is either now playing or queued at {@code firstPosition}), and reports
-     * how many followed it onto the queue.
-     */
     public static MessageEmbed playlistQueued(
             String playlistTitle, int totalTracks, String firstTrackTitle,
             boolean startedNow, int firstPosition) {
@@ -61,8 +57,8 @@ public final class Embeds {
                 .setAuthor(header, null, QUEUE_ICON)
                 .setDescription("**" + escape(playlistTitle == null ? "Playlist" : playlistTitle) + "**\n"
                         + totalTracks + " track" + (totalTracks == 1 ? "" : "s"));
-        String firstLabel = startedNow ? "Now playing" : "First track";
-        b.addField(firstLabel, "**" + escape(firstTrackTitle) + "**", false);
+        b.addField(startedNow ? "Now playing" : "First track",
+                "**" + escape(firstTrackTitle) + "**", false);
         if (!startedNow) {
             b.setFooter("First at position #" + firstPosition);
         } else if (totalTracks > 1) {
@@ -121,7 +117,33 @@ public final class Embeds {
         return b.build();
     }
 
-    /** Escape Discord markdown so titles with * or _ render literally. */
+    public static MessageEmbed prefixUpdated(String newPrefix) {
+        return new EmbedBuilder()
+                .setColor(SUCCESS)
+                .setAuthor("Prefix updated", null, GEAR_ICON)
+                .setDescription("Text commands now respond to `" + newPrefix + "`.")
+                .build();
+    }
+
+    /** Renders the full user-profile card used by {@code /info} and {@code <prefix>info}. */
+    public static MessageEmbed userInfo(
+            String username, String userId, boolean bot, String avatarUrl,
+            String joinedDiscord, String joinedServer, String displayName,
+            String roles, String status, long replyLatencyMillis) {
+        EmbedBuilder b = new EmbedBuilder()
+                .setColor(INFO)
+                .setAuthor(username + (bot ? " (bot)" : ""), null, PERSON_ICON)
+                .setThumbnail(avatarUrl)
+                .addField("Display name", escape(displayName), true)
+                .addField("User ID", "`" + userId + "`", true)
+                .addField("Status", status, true)
+                .addField("Joined Discord on", joinedDiscord, true)
+                .addField("Joined Server on", joinedServer, true)
+                .addField("Roles", roles, false)
+                .setFooter("Ran for " + replyLatencyMillis + " ms");
+        return b.build();
+    }
+
     private static String escape(String s) {
         if (s == null) return "";
         return s.replace("\\", "\\\\")

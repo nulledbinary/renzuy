@@ -1,11 +1,10 @@
 name: CI
 
-# Runs on PRs targeting main, and on direct pushes to main.
-# Pushes to `development` (or any other branch) do nothing — the deploy workflow
-# also only fires on main, so feature branches never trigger AWS work.
+# Runs only on direct pushes to main. PRs from development (or anywhere else) do
+# NOT trigger this workflow, and pushes to development never run CI either — the
+# deploy workflow likewise only fires on main, so feature branches stay free of
+# CI noise.
 on:
-  pull_request:
-    branches: [main]
   push:
     branches: [main]
 
@@ -23,6 +22,9 @@ jobs:
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
+
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew
 
       - name: Build & test
         run: ./gradlew --no-daemon --no-configuration-cache build

@@ -16,11 +16,15 @@ import net.dv8tion.jda.api.utils.cache.CacheFlag;
 import renzuy.audio.MusicService;
 import renzuy.commands.CommandRegistrar;
 import renzuy.commands.HelpCommand;
+import renzuy.commands.InfoCommand;
 import renzuy.commands.PlayCommand;
+import renzuy.commands.PrefixCommand;
 import renzuy.commands.QueueCommand;
 import renzuy.commands.RemoveCommand;
 import renzuy.commands.SkipCommand;
 import renzuy.commands.StopCommand;
+import renzuy.commands.text.TextCommandRouter;
+import renzuy.config.PrefixStore;
 import renzuy.listeners.MessageListener;
 
 public final class Bot {
@@ -34,6 +38,16 @@ public final class Bot {
         }
 
         MusicService music = new MusicService();
+        PrefixStore prefixes = PrefixStore.defaultLocation();
+
+        HelpCommand helpCommand = new HelpCommand(prefixes);
+        PlayCommand playCommand = new PlayCommand(music);
+        StopCommand stopCommand = new StopCommand(music);
+        SkipCommand skipCommand = new SkipCommand(music);
+        QueueCommand queueCommand = new QueueCommand(music);
+        RemoveCommand removeCommand = new RemoveCommand(music);
+        InfoCommand infoCommand = new InfoCommand();
+        PrefixCommand prefixCommand = new PrefixCommand(prefixes);
 
         SlashCommandData[] commands = {
                 Commands.slash(HelpCommand.NAME, "Show the list of available commands"),
@@ -46,8 +60,18 @@ public final class Bot {
                 Commands.slash(RemoveCommand.NAME, "Remove a track from the queue by its number")
                         .addOptions(new OptionData(OptionType.INTEGER, RemoveCommand.POSITION_OPTION,
                                 "Position in the queue (1 = next up)", true)
-                                .setMinValue(1))
+                                .setMinValue(1)),
+                Commands.slash(InfoCommand.NAME, "Show profile information for a user")
+                        .addOption(OptionType.USER, InfoCommand.OPTION,
+                                "The user to look up — defaults to you", false),
+                Commands.slash(PrefixCommand.NAME, "Admin: set the text-command prefix (single special character)")
+                        .addOption(OptionType.STRING, PrefixCommand.OPTION,
+                                "A single special character, e.g. ! @ # $ % ^ &", true)
         };
+
+        TextCommandRouter router = new TextCommandRouter(prefixes,
+                helpCommand, playCommand, stopCommand, skipCommand,
+                queueCommand, removeCommand, infoCommand);
 
         JDA jda = JDABuilder.createLight(token,
                         GatewayIntent.GUILD_MESSAGES,
@@ -58,19 +82,14 @@ public final class Bot {
                         .withDaveSessionFactory(new JDaveSessionFactory()))
                 .enableCache(CacheFlag.VOICE_STATE)
                 .setMemberCachePolicy(MemberCachePolicy.VOICE)
-                // Show a starting status immediately; PresenceUpdater takes over after ready.
                 .setStatus(OnlineStatus.IDLE)
                 .setActivity(Activity.customStatus("Booting…"))
                 .addEventListeners(
-                        new HelpCommand(),
+                        helpCommand, playCommand, stopCommand, skipCommand,
+                        queueCommand, removeCommand, infoCommand, prefixCommand,
+                        router,
                         new MessageListener(),
-                        new PlayCommand(music),
-                        new StopCommand(music),
-                        new SkipCommand(music),
-                        new QueueCommand(music),
-                        new RemoveCommand(music),
-                        new CommandRegistrar(commands)
-                )
+                        new CommandRegistrar(commands))
                 .build()
                 .awaitReady();
 
