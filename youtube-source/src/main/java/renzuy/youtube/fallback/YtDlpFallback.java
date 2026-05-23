@@ -33,6 +33,17 @@ public final class YtDlpFallback {
     private static final long PROCESS_TIMEOUT_SECONDS = 25L;
     private static final long FALLBACK_URL_TTL_MILLIS = 30L * 60L * 1000L;
 
+    /**
+     * Tells yt-dlp which Innertube clients to ask. Default web/tv clients increasingly
+     * trip YouTube's "Sign in to confirm you're not a bot" wall when the request comes
+     * from a datacenter IP (AWS, GCP, ...). The clients here have historically replied
+     * to anonymous requests from cloud IPs without demanding cookies or a PoToken;
+     * {@code mweb} (mobile web) and {@code tv_embedded} have been the most resilient.
+     * Order matters — yt-dlp tries them left-to-right.
+     */
+    private static final String YOUTUBE_EXTRACTOR_ARGS =
+            "youtube:player_client=mweb,tv_embedded,android,web";
+
     private final String ytDlpPath;
 
     public YtDlpFallback(String ytDlpPath) {
@@ -141,6 +152,7 @@ public final class YtDlpFallback {
                 "--no-playlist",
                 "--no-warnings",
                 "--quiet",
+                "--extractor-args", YOUTUBE_EXTRACTOR_ARGS,
                 "--print", "title",
                 "--print", "url",
                 "--print", "duration",
@@ -159,6 +171,7 @@ public final class YtDlpFallback {
                 "--flat-playlist",
                 "--no-warnings",
                 "--quiet",
+                "--extractor-args", YOUTUBE_EXTRACTOR_ARGS,
                 "--print", "id",
                 "--print", "title",
                 "--print", "duration",
