@@ -59,6 +59,19 @@ public final class YtDlpFallback {
     private static final String YOUTUBE_EXTRACTOR_ARGS =
             "youtube:player_client=tv,tv_embedded,android_vr,mweb";
 
+    /**
+     * yt-dlp's {@code --impersonate} target. Uses curl_cffi under the hood to emit
+     * a TLS ClientHello and HTTP/2 frame sequence that match real Chrome on
+     * Windows, instead of Python's default urllib fingerprint. From an AWS
+     * Fargate egress IP, that fingerprint is now an independent input to
+     * YouTube's bot-detection score on top of the source ASN — so requests get
+     * walled even when session cookies are valid. The Docker image installs
+     * yt-dlp via {@code pip install yt-dlp[curl-cffi]} so this target is always
+     * available at runtime; if curl_cffi is somehow missing, yt-dlp exits
+     * nonzero and the caller falls through to the existing error handling.
+     */
+    private static final String IMPERSONATE_TARGET = "chrome";
+
     private final String ytDlpPath;
     private final String cookiesPath;
 
@@ -248,6 +261,7 @@ public final class YtDlpFallback {
         cmd.add("--no-warnings");
         cmd.add("--quiet");
         cmd.add("--extractor-args"); cmd.add(YOUTUBE_EXTRACTOR_ARGS);
+        cmd.add("--impersonate"); cmd.add(IMPERSONATE_TARGET);
         appendCookiesArg(cmd);
         cmd.add("--print"); cmd.add("title");
         cmd.add("--print"); cmd.add("url");
@@ -269,6 +283,7 @@ public final class YtDlpFallback {
         cmd.add("--no-warnings");
         cmd.add("--quiet");
         cmd.add("--extractor-args"); cmd.add(YOUTUBE_EXTRACTOR_ARGS);
+        cmd.add("--impersonate"); cmd.add(IMPERSONATE_TARGET);
         appendCookiesArg(cmd);
         cmd.add("--print"); cmd.add("id");
         cmd.add("--print"); cmd.add("title");

@@ -20,16 +20,22 @@ RUN ./gradlew --no-daemon --no-configuration-cache :app:installDist -x test
 # --- Stage 2: minimal runtime ---
 FROM eclipse-temurin:25-jre-noble
 
-# yt-dlp is a Python script (#!/usr/bin/env python3) — python3 is required at runtime
-# or every invocation dies with "/usr/bin/env: 'python3': No such file or directory".
+# yt-dlp is a Python script; python3 is required at runtime. We install via pip
+# (rather than the standalone curl-downloaded zipapp) specifically to pull
+# curl_cffi alongside it. curl_cffi gives yt-dlp the --impersonate flag, which
+# rewrites the TLS ClientHello and HTTP/2 frame sequence to match real Chrome.
+# The default Python/urllib fingerprint is now an independent signal YouTube
+# scores against on top of the source ASN, so from a Fargate egress IP the bare
+# Python stack trips the bot-detection wall even when session cookies are valid.
+# --break-system-packages is needed on Ubuntu 24.04 (Noble): PEP 668 marks the
+# system Python externally-managed, but the container image *is* the environment
+# so a system-wide install is the intended placement.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ffmpeg python3 curl ca-certificates \
- && curl -fsSL https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
-        -o /usr/local/bin/yt-dlp \
- && chmod +x /usr/local/bin/yt-dlp \
- && /usr/local/bin/yt-dlp --version \
- && apt-get purge -y --auto-remove curl \
- && rm -rf /var/lib/apt/lists/*
+ && apt-get install -y --no-install-recommends ffmpeg python3 python3-pip ca-certificates \
+ && pip install --no-cache-dir --break-system-packages "yt-dlp[default,curl-cffi]" \
+ && yt-dlp --version \
+ && yt-dlp --list-impersonate-targets | grep -q '^chrome' \
+ && rm -rf /var/lib/apt/lists/* /root/.cache
 
 RUN useradd --create-home --shell /usr/sbin/nologin --uid 10001 renzuy
 USER renzuy
