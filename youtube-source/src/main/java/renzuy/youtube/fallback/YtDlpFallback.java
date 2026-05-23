@@ -68,6 +68,18 @@ public final class YtDlpFallback {
      * threads.
      */
     private final AtomicLong botChallengeUntil = new AtomicLong(0L);
+     * Tells yt-dlp which Innertube clients to ask. Default web/tv clients increasingly
+     * trip YouTube's "Sign in to confirm you're not a bot" wall when the request comes
+     * from a datacenter IP (AWS, GCP, ...). The clients here have historically replied
+     * to anonymous requests from cloud IPs without demanding cookies or a PoToken;
+     * {@code mweb} (mobile web) and {@code tv_embedded} have been the most resilient.
+     * Order matters — yt-dlp tries them left-to-right.
+     */
+    private static final String YOUTUBE_EXTRACTOR_ARGS =
+            "youtube:player_client=mweb,tv_embedded,android,web";
+
+    private final String ytDlpPath;
+    private final String cookiesPath;
 
     public YtDlpFallback(String ytDlpPath) {
         this(ytDlpPath, "");
@@ -258,6 +270,20 @@ public final class YtDlpFallback {
         cmd.add("--format"); cmd.add("bestaudio/best");
         cmd.add(target);
         return cmd;
+        return List.of(
+                ytDlpPath,
+                "--no-playlist",
+                "--no-warnings",
+                "--quiet",
+                "--extractor-args", YOUTUBE_EXTRACTOR_ARGS,
+                "--print", "title",
+                "--print", "url",
+                "--print", "duration",
+                "--print", "uploader",
+                "--print", "webpage_url",
+                "--print", "id",
+                "--format", "bestaudio/best",
+                target);
     }
 
     private List<String> playlistCommand(String playlistUrl) {
@@ -284,6 +310,18 @@ public final class YtDlpFallback {
             cmd.add("--cookies");
             cmd.add(cookiesPath);
         }
+        return List.of(
+                ytDlpPath,
+                "--flat-playlist",
+                "--no-warnings",
+                "--quiet",
+                "--extractor-args", YOUTUBE_EXTRACTOR_ARGS,
+                "--print", "id",
+                "--print", "title",
+                "--print", "duration",
+                "--print", "uploader",
+                "--print", "webpage_url",
+                playlistUrl);
     }
 
     private AudioReference parse(String stdout, String originalQuery) {
