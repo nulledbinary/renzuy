@@ -29,6 +29,10 @@ youtube-source/bin/
 *.md
 *.png
 
+# Local-only deploy artifacts (task defs, IAM policies) — not consumed by Docker.
+# entrypoint.sh lives at the repo root and is git-tracked so it isn't affected.
+deploy/
+
 # OS junk
 Thumbs.db
 .DS_Store

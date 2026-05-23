@@ -7,9 +7,11 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import renzuy.youtube.AudioReference;
+import renzuy.youtube.BotChallengeException;
 import renzuy.youtube.YoutubeSourceException;
 
 /**
@@ -34,6 +36,38 @@ public final class YtDlpFallback {
     private static final long FALLBACK_URL_TTL_MILLIS = 30L * 60L * 1000L;
 
     /**
+     * How long to skip the yt-dlp YouTube path after the bot wall fires. Each failed
+     * attempt costs a Python cold-start and a multi-second timeout, and the wall
+     * almost never lifts within seconds — backing off avoids spamming both YouTube
+     * and the user while the wall is up. Non-YouTube targets (Spotify / SoundCloud
+     * / direct URLs) are unaffected by the breaker.
+     */
+    private static final long BOT_CHALLENGE_BACKOFF_MILLIS = 5L * 60L * 1000L;
+
+    /**
+     * Tells yt-dlp which Innertube clients to ask. The {@code web} and {@code android}
+     * clients have started demanding a GVS PoToken (and the bot-detection wall) when
+     * the request comes from a datacenter IP (AWS, GCP, ...). The clients here have
+     * historically replied to anonymous requests from cloud IPs without demanding
+     * cookies or a PoToken; {@code tv} (the Smart TV YouTube app) has been the most
+     * resilient through 2025–2026, with {@code tv_embedded} and {@code android_vr}
+     * (Oculus) as backups. Order matters — yt-dlp tries them left-to-right.
+     *
+     * <p>If even these trip the wall (it happens for some videos / from some egress
+     * IPs), set {@code YT_DLP_COOKIES} so yt-dlp can present an authenticated session.
+     */
+    private static final String YOUTUBE_EXTRACTOR_ARGS =
+            "youtube:player_client=tv,tv_embedded,android_vr,mweb";
+
+    private final String ytDlpPath;
+    private final String cookiesPath;
+
+    /**
+     * Epoch-millis until which YouTube resolutions short-circuit. {@code 0} means
+     * the breaker is closed. Atomic because resolution runs on per-guild worker
+     * threads.
+     */
+    private final AtomicLong botChallengeUntil = new AtomicLong(0L);
      * Tells yt-dlp which Innertube clients to ask. Default web/tv clients increasingly
      * trip YouTube's "Sign in to confirm you're not a bot" wall when the request comes
      * from a datacenter IP (AWS, GCP, ...). The clients here have historically replied
@@ -66,7 +100,19 @@ public final class YtDlpFallback {
      * @throws YoutubeSourceException if yt-dlp finds no entries or fails
      */
     public List<AudioReference> resolvePlaylist(String playlistUrl) {
-        String stdout = runYtDlp(playlistCommand(playlistUrl));
+        boolean youTubeTarget = isYouTubeTarget(playlistUrl);
+        if (youTubeTarget) {
+            throwIfBreakerOpen();
+        }
+        String stdout;
+        try {
+            stdout = runYtDlp(playlistCommand(playlistUrl));
+        } catch (BotChallengeException e) {
+            if (youTubeTarget) {
+                tripBreaker();
+            }
+            throw e;
+        }
 
         // --flat-playlist emits one block per entry; the --print flags below produce
         // exactly 5 lines per entry, in order: id, title, duration, uploader, webpage_url.
@@ -109,7 +155,23 @@ public final class YtDlpFallback {
      */
     public AudioReference resolve(String query) {
         String target = looksLikeUrl(query) ? query : "ytsearch1:" + query;
-        return parse(runYtDlp(command(target)), query);
+        boolean youTubeTarget = isYouTubeTarget(target);
+        if (youTubeTarget) {
+            throwIfBreakerOpen();
+        }
+        try {
+            AudioReference resolved = parse(runYtDlp(command(target)), query);
+            if (youTubeTarget) {
+                // Cookies (or chance) are working again — let later calls retry.
+                botChallengeUntil.set(0L);
+            }
+            return resolved;
+        } catch (BotChallengeException e) {
+            if (youTubeTarget) {
+                tripBreaker();
+            }
+            throw e;
+        }
     }
 
     private String runYtDlp(List<String> command) {
@@ -146,13 +208,68 @@ public final class YtDlpFallback {
 
         if (process.exitValue() != 0) {
             String detail = stderr.isEmpty() ? "exit " + process.exitValue() : stderr.toString().strip();
+            if (isBotWall(detail)) {
+                // Don't surface the multi-line yt-dlp paragraph to the user — the UI
+                // layer renders a stable friendly message for this exception type.
+                throw new BotChallengeException(
+                        "YouTube served the bot-detection wall (cookies missing or expired)");
+            }
             throw new YoutubeSourceException("yt-dlp failed: " + detail);
         }
         return stdout.toString();
     }
 
+    private static boolean isBotWall(String stderrText) {
+        if (stderrText == null || stderrText.isEmpty()) return false;
+        String lower = stderrText.toLowerCase(Locale.ROOT);
+        // Match both straight and curly apostrophe variants yt-dlp emits.
+        return lower.contains("sign in to confirm") && lower.contains("not a bot");
+    }
+
+    private static boolean isYouTubeTarget(String target) {
+        if (target == null || target.isEmpty()) return false;
+        String lower = target.toLowerCase(Locale.ROOT);
+        return lower.contains("youtube.com")
+                || lower.contains("youtu.be")
+                || lower.contains("youtube-nocookie.com")
+                || lower.startsWith("ytsearch");
+    }
+
+    private void throwIfBreakerOpen() {
+        long until = botChallengeUntil.get();
+        long now = System.currentTimeMillis();
+        if (until > now) {
+            long secondsLeft = Math.max(1L, (until - now) / 1000L);
+            throw new BotChallengeException(
+                    "YouTube bot wall in effect (retry in ~" + secondsLeft + "s)");
+        }
+    }
+
+    private void tripBreaker() {
+        long until = System.currentTimeMillis() + BOT_CHALLENGE_BACKOFF_MILLIS;
+        botChallengeUntil.set(until);
+        log.warn("[yt-dlp] YouTube bot wall hit — pausing YouTube fallback for {}s",
+                BOT_CHALLENGE_BACKOFF_MILLIS / 1000L);
+    }
+
     private List<String> command(String target) {
         // One --print per field; yt-dlp emits them as lines in this exact order.
+        List<String> cmd = new ArrayList<>(20);
+        cmd.add(ytDlpPath);
+        cmd.add("--no-playlist");
+        cmd.add("--no-warnings");
+        cmd.add("--quiet");
+        cmd.add("--extractor-args"); cmd.add(YOUTUBE_EXTRACTOR_ARGS);
+        appendCookiesArg(cmd);
+        cmd.add("--print"); cmd.add("title");
+        cmd.add("--print"); cmd.add("url");
+        cmd.add("--print"); cmd.add("duration");
+        cmd.add("--print"); cmd.add("uploader");
+        cmd.add("--print"); cmd.add("webpage_url");
+        cmd.add("--print"); cmd.add("id");
+        cmd.add("--format"); cmd.add("bestaudio/best");
+        cmd.add(target);
+        return cmd;
         return List.of(
                 ytDlpPath,
                 "--no-playlist",
@@ -172,6 +289,27 @@ public final class YtDlpFallback {
     private List<String> playlistCommand(String playlistUrl) {
         // --flat-playlist makes yt-dlp list entries without resolving each one — fast
         // even for huge playlists. Five --print fields per entry, in fixed order.
+        List<String> cmd = new ArrayList<>(16);
+        cmd.add(ytDlpPath);
+        cmd.add("--flat-playlist");
+        cmd.add("--no-warnings");
+        cmd.add("--quiet");
+        cmd.add("--extractor-args"); cmd.add(YOUTUBE_EXTRACTOR_ARGS);
+        appendCookiesArg(cmd);
+        cmd.add("--print"); cmd.add("id");
+        cmd.add("--print"); cmd.add("title");
+        cmd.add("--print"); cmd.add("duration");
+        cmd.add("--print"); cmd.add("uploader");
+        cmd.add("--print"); cmd.add("webpage_url");
+        cmd.add(playlistUrl);
+        return cmd;
+    }
+
+    private void appendCookiesArg(List<String> cmd) {
+        if (!cookiesPath.isBlank()) {
+            cmd.add("--cookies");
+            cmd.add(cookiesPath);
+        }
         return List.of(
                 ytDlpPath,
                 "--flat-playlist",

@@ -15,6 +15,7 @@ import renzuy.audio.GuildAudioPlayer;
 import renzuy.audio.MusicService;
 import renzuy.commands.text.TextCommand;
 import renzuy.ui.Embeds;
+import renzuy.youtube.BotChallengeException;
 import renzuy.youtube.ResolveResult;
 import renzuy.youtube.YoutubeSourceException;
 
@@ -99,6 +100,16 @@ public final class PlayCommand extends ListenerAdapter implements TextCommand {
         ResolveResult result;
         try {
             result = music.getSource().resolve(query);
+        } catch (BotChallengeException e) {
+            // YouTube's bot wall is up for this egress IP. Render a stable one-liner
+            // instead of leaking yt-dlp's multi-line stderr to every user that runs
+            // /play while it persists. The source layer also pauses YouTube fallback
+            // attempts for a few minutes so we stop hammering yt-dlp.
+            reply.accept(Embeds.warn(
+                    "YouTube is currently blocking this bot's server IP. "
+                            + "Playback will retry automatically in a few minutes — "
+                            + "or ask the operator to refresh the YouTube cookies."));
+            return;
         } catch (YoutubeSourceException e) {
             reply.accept(Embeds.error("Could not resolve: " + e.getMessage()));
             return;
