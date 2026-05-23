@@ -11,7 +11,8 @@ import net.dv8tion.jda.api.interactions.commands.OptionMapping;
 import org.jetbrains.annotations.NotNull;
 import renzuy.audio.GuildAudioPlayer;
 import renzuy.audio.MusicService;
-import renzuy.youtube.AudioReference;
+import renzuy.ui.Embeds;
+import renzuy.youtube.ResolveResult;
 import renzuy.youtube.YoutubeSourceException;
 
 public final class PlayCommand extends ListenerAdapter {
@@ -33,7 +34,8 @@ public final class PlayCommand extends ListenerAdapter {
 
         Guild guild = event.getGuild();
         if (guild == null) {
-            event.reply("This command can only be used in a server.").setEphemeral(true).queue();
+            event.replyEmbeds(Embeds.warn("This command can only be used in a server."))
+                    .setEphemeral(true).queue();
             return;
         }
 
@@ -41,54 +43,63 @@ public final class PlayCommand extends ListenerAdapter {
         GuildVoiceState voiceState = member != null ? member.getVoiceState() : null;
         AudioChannel voiceChannel = voiceState != null ? voiceState.getChannel() : null;
         if (voiceChannel == null) {
-            event.reply("Join a voice channel first.").setEphemeral(true).queue();
+            event.replyEmbeds(Embeds.warn("Join a voice channel first.")).setEphemeral(true).queue();
             return;
         }
 
         OptionMapping queryOption = event.getOption(QUERY_OPTION);
         String query = queryOption != null ? queryOption.getAsString().trim() : "";
         if (query.isEmpty()) {
-            event.reply("You must provide a YouTube URL or a search term.")
+            event.replyEmbeds(Embeds.warn("You must provide a YouTube URL or a search term."))
                     .setEphemeral(true).queue();
             return;
         }
 
-        event.deferReply().queue();
+        // Defer ephemerally — only the invoker ever sees the eventual reply.
+        event.deferReply(true).queue();
 
         GuildAudioPlayer player = music.getOrCreate(guild);
 
         try {
             guild.getAudioManager().openAudioConnection(voiceChannel);
         } catch (Exception e) {
-            event.getHook().sendMessage("Could not join voice channel: " + e.getMessage()).queue();
+            event.getHook().editOriginalEmbeds(Embeds.error("Could not join voice channel: " + e.getMessage())).queue();
             return;
         }
 
-        // Resolution can block (warm HTTP request, or a yt-dlp subprocess on the
-        // fallback path) — keep it off the JDA event thread.
         Thread worker = new Thread(() -> resolveAndQueue(event, player, query), "play-resolver");
         worker.setDaemon(true);
         worker.start();
     }
 
     private void resolveAndQueue(SlashCommandInteractionEvent event, GuildAudioPlayer player, String query) {
-        AudioReference track;
+        ResolveResult result;
         try {
-            track = music.getSource().resolve(query);
+            result = music.getSource().resolve(query);
         } catch (YoutubeSourceException e) {
-            event.getHook().sendMessage("Could not resolve: " + e.getMessage()).queue();
+            event.getHook().editOriginalEmbeds(Embeds.error("Could not resolve: " + e.getMessage())).queue();
             return;
         }
 
         boolean startedNow;
         try {
-            startedNow = player.enqueue(track);
+            startedNow = player.enqueueAll(result.tracks());
         } catch (IOException e) {
-            event.getHook().sendMessage("Could not start playback: " + e.getMessage()).queue();
+            event.getHook().editOriginalEmbeds(Embeds.error("Could not start playback: " + e.getMessage())).queue();
             return;
         }
 
-        String prefix = startedNow ? "Now playing: " : "Queued: ";
-        event.getHook().sendMessage(prefix + "**" + track.title() + "**").queue();
+        String firstTitle = result.first().title();
+        if (result.isPlaylist()) {
+            int firstPosition = startedNow ? 0 : player.pendingTracks().size() - (result.tracks().size() - 1);
+            event.getHook().editOriginalEmbeds(
+                    Embeds.playlistQueued(result.playlistTitle(), result.tracks().size(),
+                            firstTitle, startedNow, Math.max(firstPosition, 1))).queue();
+        } else if (startedNow) {
+            event.getHook().editOriginalEmbeds(Embeds.playing(firstTitle)).queue();
+        } else {
+            int position = player.pendingTracks().size();
+            event.getHook().editOriginalEmbeds(Embeds.queued(firstTitle, position)).queue();
+        }
     }
 }

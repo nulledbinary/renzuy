@@ -1,0 +1,34 @@
+# Local toolchain — re-installed inside the image
+tools/
+
+# Build outputs / caches
+.gradle/
+build/
+app/build/
+app/bin/
+youtube-source/build/
+youtube-source/bin/
+
+# IDE / editor
+.vscode/
+.idea/
+*.iml
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# Secrets — production secrets come from ECS task definition env vars
+.env
+.env.*
+!.env.example
+
+# CI / docs / screenshots — not needed in the image
+.github/
+*.md
+*.png
+
+# OS junk
+Thumbs.db
+.DS_Store

@@ -1,5 +1,6 @@
 package renzuy.youtube;
 
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -68,28 +69,53 @@ public final class YoutubeSource {
     }
 
     /**
-     * Resolves a {@code /play} argument — a YouTube URL, a non-YouTube URL, or a
-     * free-text search term — into a single, directly-playable {@link AudioReference}.
+     * Resolves a {@code /play} argument into one or more playable tracks.
+     *
+     * <p>For a single video, search term, or non-playlist URL, the result contains a
+     * single fully-resolved {@link AudioReference}. For a playlist URL (YouTube,
+     * YouTube Music, SoundCloud set, ...) it contains the first entry fully resolved
+     * and the rest as {@linkplain AudioReference#isLazy() lazy} placeholders — call
+     * {@link #resolveLazy(AudioReference)} on those before handing them to ffmpeg.
      *
      * <p>Blocking: call this from a worker thread, not from an event-loop thread.
      *
      * @throws YoutubeSourceException if nothing playable could be produced
      */
-    public AudioReference resolve(String query) {
+    public ResolveResult resolve(String query) {
         long startNanos = System.nanoTime();
         QueryClassifier.Result classified = QueryClassifier.classify(query);
 
-        AudioReference reference = switch (classified.kind()) {
-            case VIDEO -> resolveVideo(classified.value());
-            case SEARCH -> resolveSearch(classified.value());
-            case PLAYLIST, FOREIGN_URL -> resolveViaFallback(query, classified.kind().name());
+        ResolveResult result = switch (classified.kind()) {
+            case VIDEO -> ResolveResult.single(resolveVideo(classified.value()));
+            case SEARCH -> ResolveResult.single(resolveSearch(classified.value()));
+            case PLAYLIST -> resolvePlaylist(query);
+            case FOREIGN_URL -> resolveForeign(query);
         };
 
-        log.info("Resolved [{}] in {} ms via {}",
+        log.info("Resolved [{}] in {} ms ({} track{})",
                 classified.kind(),
                 (System.nanoTime() - startNanos) / 1_000_000L,
-                reference.origin());
-        return reference;
+                result.tracks().size(),
+                result.tracks().size() == 1 ? "" : "s");
+        return result;
+    }
+
+    /**
+     * Materializes a {@linkplain AudioReference#isLazy() lazy} reference into one
+     * with a real stream URL. Use this just before playback for tracks that came in
+     * a playlist enumeration.
+     *
+     * @throws YoutubeSourceException if the entry can no longer be resolved
+     */
+    public AudioReference resolveLazy(AudioReference lazy) {
+        if (!lazy.isLazy()) {
+            return lazy;
+        }
+        if (!lazy.videoId().isBlank() && lazy.videoId().length() == 11) {
+            return resolveVideo(lazy.videoId());
+        }
+        // Non-YouTube entry (SoundCloud track in a set, ...) — re-run yt-dlp on its page URL.
+        return resolveViaFallback(lazy.webpageUrl(), "LAZY");
     }
 
     // ------------------------------------------------------------------------
@@ -130,5 +156,76 @@ public final class YoutubeSource {
         AudioReference reference = fallback.resolve(query);
         cache.put(reference);
         return reference;
+    }
+
+    /**
+     * For a playlist URL: enumerate entries (lazy stubs) and eagerly resolve only the
+     * first one so playback can start without waiting on the rest.
+     */
+    private ResolveResult resolvePlaylist(String playlistUrl) {
+        if (!options.fallbackEnabled()) {
+            throw new YoutubeSourceException(
+                    "Playlist support requires the yt-dlp fallback, which is disabled");
+        }
+        List<AudioReference> lazy = fallback.resolvePlaylist(playlistUrl);
+        AudioReference firstResolved;
+        try {
+            firstResolved = resolveLazy(lazy.get(0));
+        } catch (YoutubeSourceException e) {
+            // First entry unplayable — try the next ones until one succeeds.
+            firstResolved = null;
+            int skipped = 0;
+            for (int i = 1; i < lazy.size(); i++) {
+                try {
+                    firstResolved = resolveLazy(lazy.get(i));
+                    skipped = i;
+                    break;
+                } catch (YoutubeSourceException ignored) {
+                    // keep looking
+                }
+            }
+            if (firstResolved == null) {
+                throw new YoutubeSourceException(
+                        "No playable entries in playlist (" + lazy.size() + " skipped)", e);
+            }
+            lazy = lazy.subList(skipped, lazy.size());
+        }
+        List<AudioReference> out = new java.util.ArrayList<>(lazy.size());
+        out.add(firstResolved);
+        for (int i = 1; i < lazy.size(); i++) {
+            out.add(lazy.get(i));
+        }
+        return new ResolveResult(out, playlistTitleFromUrl(playlistUrl));
+    }
+
+    /**
+     * For a non-YouTube URL: ask yt-dlp. If it yields a single track we return it
+     * directly; if it yields a multi-entry playlist (e.g. a SoundCloud set, a Bandcamp
+     * album) we promote to the playlist path so every entry is queued.
+     */
+    private ResolveResult resolveForeign(String url) {
+        try {
+            return ResolveResult.single(resolveViaFallback(url, "FOREIGN_URL"));
+        } catch (YoutubeSourceException single) {
+            // yt-dlp with --no-playlist often fails on a set/album URL — retry as a playlist.
+            try {
+                return resolvePlaylist(url);
+            } catch (YoutubeSourceException playlist) {
+                // Surface the original single-track error; it is usually the more helpful one.
+                throw single;
+            }
+        }
+    }
+
+    /** Best-effort: pull a readable label out of the playlist URL for the UI. */
+    private static String playlistTitleFromUrl(String url) {
+        int listMarker = url.indexOf("list=");
+        if (listMarker >= 0) {
+            int start = listMarker + "list=".length();
+            int end = url.indexOf('&', start);
+            String id = end < 0 ? url.substring(start) : url.substring(start, end);
+            return "Playlist " + id;
+        }
+        return "Playlist";
     }
 }

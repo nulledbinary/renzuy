@@ -3,6 +3,7 @@ package renzuy.youtube.fallback;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.TimeUnit;
@@ -39,16 +40,65 @@ public final class YtDlpFallback {
     }
 
     /**
+     * Enumerates the entries of a playlist URL (YouTube, YouTube Music, SoundCloud
+     * set, ...) using yt-dlp's {@code --flat-playlist} mode — no per-entry stream
+     * resolution, just metadata. The returned list contains
+     * {@linkplain AudioReference#isLazy() lazy} references that must be re-resolved
+     * before playback.
+     *
+     * @throws YoutubeSourceException if yt-dlp finds no entries or fails
+     */
+    public List<AudioReference> resolvePlaylist(String playlistUrl) {
+        String stdout = runYtDlp(playlistCommand(playlistUrl));
+
+        // --flat-playlist emits one block per entry; the --print flags below produce
+        // exactly 5 lines per entry, in order: id, title, duration, uploader, webpage_url.
+        String[] lines = stdout.split("\\r?\\n");
+        List<AudioReference> entries = new ArrayList<>();
+        for (int i = 0; i + 4 < lines.length; i += 5) {
+            String id          = lines[i].strip();
+            String title       = lines[i + 1].strip();
+            String duration    = lines[i + 2].strip();
+            String uploader    = lines[i + 3].strip();
+            String webpageUrl  = lines[i + 4].strip();
+
+            if (title.isEmpty() || title.equals("NA")) {
+                title = "Untitled track";
+            }
+            if (uploader.isEmpty() || uploader.equals("NA")) {
+                uploader = "Unknown";
+            }
+            long durationMillis = parseDurationMillis(duration);
+            String pageUrl = webpageUrl.isEmpty() || webpageUrl.equals("NA")
+                    ? (id.isEmpty() ? playlistUrl : "https://www.youtube.com/watch?v=" + id)
+                    : webpageUrl;
+            // For non-YouTube entries the id is the source-native id; isLazy()/resolveLazy()
+            // re-resolves by webpageUrl in that case.
+            String videoId = id.equals("NA") ? "" : id;
+
+            entries.add(AudioReference.lazy(title, uploader, durationMillis, videoId, pageUrl));
+        }
+        if (entries.isEmpty()) {
+            throw new YoutubeSourceException("Playlist yielded no entries: " + playlistUrl);
+        }
+        log.info("[yt-dlp] enumerated {} entries from {}", entries.size(), playlistUrl);
+        return entries;
+    }
+
+    /**
      * Resolves a URL or — for a bare term — a {@code ytsearch1:} search.
      *
      * @throws YoutubeSourceException if yt-dlp is missing, times out, or finds nothing
      */
     public AudioReference resolve(String query) {
         String target = looksLikeUrl(query) ? query : "ytsearch1:" + query;
+        return parse(runYtDlp(command(target)), query);
+    }
 
+    private String runYtDlp(List<String> command) {
         Process process;
         try {
-            process = new ProcessBuilder(command(target)).start();
+            process = new ProcessBuilder(command).start();
         } catch (IOException e) {
             throw new YoutubeSourceException(
                     "yt-dlp is not available at '" + ytDlpPath + "'", e);
@@ -81,7 +131,7 @@ public final class YtDlpFallback {
             String detail = stderr.isEmpty() ? "exit " + process.exitValue() : stderr.toString().strip();
             throw new YoutubeSourceException("yt-dlp failed: " + detail);
         }
-        return parse(stdout.toString(), query);
+        return stdout.toString();
     }
 
     private List<String> command(String target) {
@@ -99,6 +149,22 @@ public final class YtDlpFallback {
                 "--print", "id",
                 "--format", "bestaudio/best",
                 target);
+    }
+
+    private List<String> playlistCommand(String playlistUrl) {
+        // --flat-playlist makes yt-dlp list entries without resolving each one — fast
+        // even for huge playlists. Five --print fields per entry, in fixed order.
+        return List.of(
+                ytDlpPath,
+                "--flat-playlist",
+                "--no-warnings",
+                "--quiet",
+                "--print", "id",
+                "--print", "title",
+                "--print", "duration",
+                "--print", "uploader",
+                "--print", "webpage_url",
+                playlistUrl);
     }
 
     private AudioReference parse(String stdout, String originalQuery) {

@@ -45,8 +45,12 @@ public final class InnertubeClients {
                     "gl", "US"));
 
     /**
-     * The Apple iOS YouTube app. Reliable secondary: returns direct URLs and HLS
-     * manifests for live content.
+     * The Apple iOS YouTube app. Kept defined but <strong>not in
+     * {@link #PLAYER_ROTATION}</strong>: in practice its URLs (which carry
+     * {@code c=IOS}) frequently 403 in ffmpeg even after a Range probe passes,
+     * because googlevideo fingerprints the request more strictly than a Range
+     * preflight reveals. Until we have a probe that matches ffmpeg's real GET,
+     * IOS is unsafe to rely on for the player path.
      */
     public static final InnertubeClient IOS = new InnertubeClient(
             "com.google.ios.youtube/20.10.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X; en_US)",
@@ -81,7 +85,7 @@ public final class InnertubeClients {
      * format wins; on failure the next is tried; if all fail the caller falls back
      * to yt-dlp.
      */
-    public static final List<InnertubeClient> PLAYER_ROTATION = List.of(ANDROID_VR, IOS);
+    public static final List<InnertubeClient> PLAYER_ROTATION = List.of(ANDROID_VR);
 
     /** The client used for the search endpoint. */
     public static final InnertubeClient SEARCH_CLIENT = WEB;
