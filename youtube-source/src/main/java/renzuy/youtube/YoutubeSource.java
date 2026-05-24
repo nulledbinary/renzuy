@@ -40,7 +40,11 @@ public final class YoutubeSource {
     public YoutubeSource(YoutubeSourceOptions options) {
         this.options = options;
         this.innertube = new InnertubeResolver(options);
-        this.fallback = new YtDlpFallback(options.ytDlpPath(), options.ytDlpCookiesPath());
+        this.fallback = new YtDlpFallback(
+                options.ytDlpPath(),
+                options.ytDlpCookiesPath(),
+                options.ytDlpProxy(),
+                options.ytDlpPoToken());
         this.cache = new StreamCache(options.cacheTtl().toMillis(), options.cacheMaxEntries());
         if (options.prewarmOnStart()) {
             prewarm();

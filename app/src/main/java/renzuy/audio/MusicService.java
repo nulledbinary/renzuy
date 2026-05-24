@@ -23,14 +23,23 @@ public final class MusicService {
         // Point the yt-dlp fallback at the bundled binary; the Innertube fast path
         // needs no configuration. Construction prewarms the connection to YouTube.
         //
-        // YT_DLP_COOKIES is an optional path to a Netscape-format cookies file. On
-        // datacenter IPs (Fargate) YouTube's bot wall fires even when every anonymous
-        // client is exhausted; presenting a logged-in cookie jar via --cookies is the
-        // most reliable workaround.
+        // Three optional env knobs feed the bot-wall mitigations in YtDlpFallback;
+        // any combination works, and zero is a valid configuration (the fallback
+        // still rotates impersonate targets and retries once before tripping).
+        //   YT_DLP_COOKIES   — path to a Netscape-format cookies file; flips the
+        //                      client order to mweb-first (cookie-aware).
+        //   YT_DLP_PROXY     — residential proxy URL passed via --proxy; the
+        //                      reliable fix on Fargate egress IPs.
+        //   YT_DLP_PO_TOKEN  — GVS PoToken from a real browser session; satisfies
+        //                      YouTube's anti-bot without a tracked login.
         String cookiesPath = DotEnv.get("YT_DLP_COOKIES");
+        String proxy       = DotEnv.get("YT_DLP_PROXY");
+        String poToken     = DotEnv.get("YT_DLP_PO_TOKEN");
         this.source = new YoutubeSource(YoutubeSourceOptions.builder()
                 .ytDlpPath(Binaries.YT_DLP)
                 .ytDlpCookiesPath(cookiesPath == null ? "" : cookiesPath)
+                .ytDlpProxy(proxy == null ? "" : proxy)
+                .ytDlpPoToken(poToken == null ? "" : poToken)
                 .build());
     }
 
