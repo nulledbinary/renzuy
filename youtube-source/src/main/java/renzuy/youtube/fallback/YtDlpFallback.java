@@ -62,16 +62,21 @@ public final class YtDlpFallback {
     private static final long BOT_CHALLENGE_BACKOFF_MILLIS = 90L * 1000L;
 
     /**
-     * Pool of {@code --impersonate} targets to rotate through. Each call picks
-     * one at random for its first attempt and a different one for the retry,
-     * so YouTube's fingerprint scorer sees independent samples rather than
-     * a single repeated signature. All targets are available in
-     * {@code yt-dlp[curl-cffi]} as of 2025+ — if curl_cffi is missing yt-dlp
-     * exits nonzero and we surface the normal error.
+     * Bare-{@code chrome} is an alias for the latest target curl_cffi has built,
+     * so it cannot fail to resolve. Used as the always-safe fallback whenever
+     * runtime detection comes back empty.
      */
-    private static final List<String> IMPERSONATE_POOL = List.of(
-            "chrome", "chrome-110", "chrome-124", "chrome-131",
-            "safari", "safari15_5", "edge-101", "firefox-133");
+    private static final List<String> SAFE_IMPERSONATE_FALLBACK = List.of("chrome");
+
+    /**
+     * Regex that matches a {@code --list-impersonate-targets} client column.
+     * Tolerant of both yt-dlp's dash-prefixed format ({@code chrome-110},
+     * {@code safari-15.5}) and curl_cffi's bare/underscored format
+     * ({@code chrome131}, {@code safari15_5}, {@code chrome131_android}).
+     */
+    private static final java.util.regex.Pattern TARGET_LINE = java.util.regex.Pattern.compile(
+            "^(chrome|safari|firefox|edge|chromium)[A-Za-z0-9._-]*$",
+            java.util.regex.Pattern.CASE_INSENSITIVE);
 
     /**
      * Client lists for cookied vs cookieless calls. yt-dlp tries clients
@@ -87,6 +92,13 @@ public final class YtDlpFallback {
     private final String cookiesPath;
     private final String proxy;
     private final String poToken;
+    /**
+     * Impersonate targets that this yt-dlp/curl_cffi actually has built — never
+     * trust a hard-coded list, since target availability moves with each
+     * curl_cffi release and asking for a missing one is a hard YoutubeDLError
+     * (no fallback inside yt-dlp). Detected once at construction.
+     */
+    private final List<String> impersonatePool;
 
     /**
      * Epoch-millis until which YouTube resolutions short-circuit. {@code 0} means
@@ -108,11 +120,57 @@ public final class YtDlpFallback {
         this.cookiesPath = cookiesPath == null ? "" : cookiesPath;
         this.proxy       = proxy == null ? "" : proxy;
         this.poToken     = poToken == null ? "" : poToken;
+        this.impersonatePool = detectImpersonateTargets(ytDlpPath);
+        log.info("[yt-dlp] {} impersonate target(s) available: {}",
+                impersonatePool.size(), impersonatePool);
         if (!this.proxy.isBlank()) {
             log.info("[yt-dlp] proxy configured: {}", redact(this.proxy));
         }
         if (!this.poToken.isBlank()) {
             log.info("[yt-dlp] PoToken configured (length {})", this.poToken.length());
+        }
+    }
+
+    /**
+     * Asks yt-dlp which impersonate targets curl_cffi has built into this
+     * runtime, so the rotation pool only contains names that resolve. Picking
+     * a non-existent target is a hard {@code YoutubeDLError} from yt-dlp with
+     * no internal fallback, so guessing here permanently kills the call.
+     *
+     * <p>The output format is a small table — header + one row per target. We
+     * take the first whitespace-delimited token of each non-header line and
+     * keep it if it looks like a browser identifier. On any failure (binary
+     * missing, exec error, empty list, ancient yt-dlp without the flag) we
+     * fall back to bare {@code chrome}, which is curl_cffi's alias for the
+     * latest target it has and therefore always resolves.
+     */
+    private static List<String> detectImpersonateTargets(String ytDlpPath) {
+        try {
+            Process p = new ProcessBuilder(ytDlpPath, "--list-impersonate-targets")
+                    .redirectErrorStream(true)
+                    .start();
+            if (!p.waitFor(10, TimeUnit.SECONDS)) {
+                p.destroyForcibly();
+                return SAFE_IMPERSONATE_FALLBACK;
+            }
+            String output = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+            if (p.exitValue() != 0) {
+                return SAFE_IMPERSONATE_FALLBACK;
+            }
+            List<String> detected = new ArrayList<>();
+            for (String raw : output.split("\\r?\\n")) {
+                String line = raw.strip();
+                if (line.isEmpty()) continue;
+                String first = line.split("\\s+")[0];
+                if (TARGET_LINE.matcher(first).matches() && !detected.contains(first)) {
+                    detected.add(first);
+                }
+            }
+            return detected.isEmpty() ? SAFE_IMPERSONATE_FALLBACK : List.copyOf(detected);
+        } catch (Exception e) {
+            log.warn("[yt-dlp] could not detect impersonate targets ({}); falling back to {}",
+                    e.getMessage(), SAFE_IMPERSONATE_FALLBACK);
+            return SAFE_IMPERSONATE_FALLBACK;
         }
     }
 
@@ -225,13 +283,13 @@ public final class YtDlpFallback {
         }
     }
 
-    private static String randomImpersonate(String avoid) {
-        if (IMPERSONATE_POOL.size() == 1) return IMPERSONATE_POOL.get(0);
+    private String randomImpersonate(String avoid) {
+        if (impersonatePool.size() == 1) return impersonatePool.get(0);
         for (int i = 0; i < 8; i++) {
-            String pick = IMPERSONATE_POOL.get(ThreadLocalRandom.current().nextInt(IMPERSONATE_POOL.size()));
+            String pick = impersonatePool.get(ThreadLocalRandom.current().nextInt(impersonatePool.size()));
             if (!pick.equals(avoid)) return pick;
         }
-        return IMPERSONATE_POOL.get(0);
+        return impersonatePool.get(0);
     }
 
     // ---------------- process runner ----------------
