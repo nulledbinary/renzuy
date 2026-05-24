@@ -120,7 +120,7 @@ public final class HelpCommand extends ListenerAdapter implements TextCommand {
     private static void appendSection(StringBuilder out, List<Entry> entries, Member member, String prefix) {
         for (Entry entry : entries) {
             if (!entry.capability().grantedTo(member)) continue;
-            out.append("`/").append(entry.usage()).append("`  or  `")
+            out.append("> `/").append(entry.usage()).append("`  or  `")
                     .append(prefix).append(entry.usage()).append("` — ")
                     .append(entry.description()).append('\n');
         }
