@@ -6,6 +6,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import org.slf4j.Logger;
@@ -18,10 +19,29 @@ import renzuy.youtube.YoutubeSourceException;
  * The yt-dlp fallback path.
  *
  * <p>Slower than the Innertube fast path — it spawns a process and pays Python's
- * cold-start — but it is extremely reliable and constantly maintained upstream. It
- * is the safety net that keeps the bot playing audio when YouTube changes break
- * in-process extraction, and it is also the path for non-YouTube links (Spotify,
- * SoundCloud, and anything else yt-dlp supports).
+ * cold-start — but extremely reliable and constantly maintained upstream. It is
+ * the safety net that keeps the bot playing audio when YouTube changes break
+ * in-process extraction, and it is also the path for non-YouTube links
+ * (Spotify, SoundCloud, and anything else yt-dlp supports).
+ *
+ * <h2>Bot-wall strategy</h2>
+ * <p>From a Fargate egress IP, YouTube's bot-detection fires almost every
+ * request unless we look like a real browser. This class layers four
+ * defences, ordered cheapest-first:
+ * <ol>
+ *   <li><b>TLS fingerprint rotation</b> — each call picks a different
+ *       {@code --impersonate} target (chrome, chrome131, safari, firefox133, …)
+ *       so two consecutive requests don't share a fingerprint. Zero config.</li>
+ *   <li><b>Internal retry</b> — a single wall doesn't trip the breaker; we
+ *       retry once with a different impersonate target + reshuffled client
+ *       order. Almost every transient wall heals on the second attempt.</li>
+ *   <li><b>Cookies</b> — if {@code YT_DLP_COOKIES} points at a Netscape
+ *       cookies file, {@code mweb} leads (cookie-aware). Otherwise
+ *       {@code tv_embedded} leads (most resilient anon client).</li>
+ *   <li><b>Proxy + PoToken</b> — operator-set {@code YT_DLP_PROXY} routes
+ *       through a residential IP, and {@code YT_DLP_PO_TOKEN} satisfies
+ *       YouTube's GVS challenge without a tracked session.</li>
+ * </ol>
  */
 public final class YtDlpFallback {
 
@@ -36,53 +56,37 @@ public final class YtDlpFallback {
     private static final long FALLBACK_URL_TTL_MILLIS = 30L * 60L * 1000L;
 
     /**
-     * How long to skip the yt-dlp YouTube path after the bot wall fires. Each failed
-     * attempt costs a Python cold-start and a multi-second timeout, and the wall
-     * almost never lifts within seconds — backing off avoids spamming both YouTube
-     * and the user while the wall is up. Non-YouTube targets (Spotify / SoundCloud
-     * / direct URLs) are unaffected by the breaker.
-     *
-     * <p>Sized for the impersonation + cookies era: transient walls now usually
-     * lift within tens of seconds (curl_cffi gets us past the TLS fingerprint
-     * check on retry), so a 90-second backoff balances "give YouTube room to
-     * cool off" against "don't punish users for a one-off blip."
+     * How long to skip the yt-dlp YouTube path after BOTH the first attempt and
+     * the retry have hit the wall. Non-YouTube targets are unaffected.
      */
     private static final long BOT_CHALLENGE_BACKOFF_MILLIS = 90L * 1000L;
 
     /**
-     * Tells yt-dlp which Innertube clients to ask. yt-dlp tries them left-to-right
-     * and stops on the first that returns a playable response — so order is policy.
-     *
-     * <p>{@code mweb} (mobile web) is first because it is the cookie-aware client
-     * in this list: when the operator has injected {@code YT_DLP_COOKIES}, mweb
-     * actually presents the session to YouTube and the bot wall stays closed.
-     * The TV-family clients ({@code tv_embedded}, {@code android_vr}, {@code tv})
-     * use a separate device-auth path that ignores web cookies; they are kept as
-     * fallback because they remain resilient against anonymous bot-detection
-     * even when cookies are absent or expired.
-     *
-     * <p>{@code web} and {@code android} are deliberately omitted — both demand
-     * a GVS PoToken from datacenter IPs and trip the wall on almost every
-     * request without one.
+     * Pool of {@code --impersonate} targets to rotate through. Each call picks
+     * one at random for its first attempt and a different one for the retry,
+     * so YouTube's fingerprint scorer sees independent samples rather than
+     * a single repeated signature. All targets are available in
+     * {@code yt-dlp[curl-cffi]} as of 2025+ — if curl_cffi is missing yt-dlp
+     * exits nonzero and we surface the normal error.
      */
-    private static final String YOUTUBE_EXTRACTOR_ARGS =
-            "youtube:player_client=mweb,tv_embedded,android_vr,tv";
+    private static final List<String> IMPERSONATE_POOL = List.of(
+            "chrome", "chrome-110", "chrome-124", "chrome-131",
+            "safari", "safari15_5", "edge-101", "firefox-133");
 
     /**
-     * yt-dlp's {@code --impersonate} target. Uses curl_cffi under the hood to emit
-     * a TLS ClientHello and HTTP/2 frame sequence that match real Chrome on
-     * Windows, instead of Python's default urllib fingerprint. From an AWS
-     * Fargate egress IP, that fingerprint is now an independent input to
-     * YouTube's bot-detection score on top of the source ASN — so requests get
-     * walled even when session cookies are valid. The Docker image installs
-     * yt-dlp via {@code pip install yt-dlp[curl-cffi]} so this target is always
-     * available at runtime; if curl_cffi is somehow missing, yt-dlp exits
-     * nonzero and the caller falls through to the existing error handling.
+     * Client lists for cookied vs cookieless calls. yt-dlp tries clients
+     * left-to-right and stops at the first that returns a playable response,
+     * so order is policy. {@code web} / {@code android} are excluded — both
+     * demand a GVS PoToken from datacenter IPs and trip the wall without one
+     * (we only opt them in when a PoToken is configured).
      */
-    private static final String IMPERSONATE_TARGET = "chrome";
+    private static final String COOKIED_CLIENTS = "mweb,tv_embedded,android_vr,tv";
+    private static final String ANON_CLIENTS    = "tv_embedded,android_vr,tv,mweb";
 
     private final String ytDlpPath;
     private final String cookiesPath;
+    private final String proxy;
+    private final String poToken;
 
     /**
      * Epoch-millis until which YouTube resolutions short-circuit. {@code 0} means
@@ -92,20 +96,31 @@ public final class YtDlpFallback {
     private final AtomicLong botChallengeUntil = new AtomicLong(0L);
 
     public YtDlpFallback(String ytDlpPath) {
-        this(ytDlpPath, "");
+        this(ytDlpPath, "", "", "");
     }
 
     public YtDlpFallback(String ytDlpPath, String cookiesPath) {
-        this.ytDlpPath = ytDlpPath;
+        this(ytDlpPath, cookiesPath, "", "");
+    }
+
+    public YtDlpFallback(String ytDlpPath, String cookiesPath, String proxy, String poToken) {
+        this.ytDlpPath  = ytDlpPath;
         this.cookiesPath = cookiesPath == null ? "" : cookiesPath;
+        this.proxy       = proxy == null ? "" : proxy;
+        this.poToken     = poToken == null ? "" : poToken;
+        if (!this.proxy.isBlank()) {
+            log.info("[yt-dlp] proxy configured: {}", redact(this.proxy));
+        }
+        if (!this.poToken.isBlank()) {
+            log.info("[yt-dlp] PoToken configured (length {})", this.poToken.length());
+        }
     }
 
     /**
-     * Enumerates the entries of a playlist URL (YouTube, YouTube Music, SoundCloud
-     * set, ...) using yt-dlp's {@code --flat-playlist} mode — no per-entry stream
-     * resolution, just metadata. The returned list contains
-     * {@linkplain AudioReference#isLazy() lazy} references that must be re-resolved
-     * before playback.
+     * Enumerates the entries of a playlist URL using yt-dlp's
+     * {@code --flat-playlist} mode — no per-entry stream resolution, just
+     * metadata. The returned list contains lazy references that must be
+     * re-resolved before playback.
      *
      * @throws YoutubeSourceException if yt-dlp finds no entries or fails
      */
@@ -114,15 +129,7 @@ public final class YtDlpFallback {
         if (youTubeTarget) {
             throwIfBreakerOpen();
         }
-        String stdout;
-        try {
-            stdout = runYtDlp(playlistCommand(playlistUrl));
-        } catch (BotChallengeException e) {
-            if (youTubeTarget) {
-                tripBreaker();
-            }
-            throw e;
-        }
+        String stdout = runWithRetry(b -> playlistCommand(playlistUrl, b), youTubeTarget, playlistUrl);
 
         // --flat-playlist emits one block per entry; the --print flags below produce
         // exactly 5 lines per entry, in order: id, title, duration, uploader, webpage_url.
@@ -145,8 +152,6 @@ public final class YtDlpFallback {
             String pageUrl = webpageUrl.isEmpty() || webpageUrl.equals("NA")
                     ? (id.isEmpty() ? playlistUrl : "https://www.youtube.com/watch?v=" + id)
                     : webpageUrl;
-            // For non-YouTube entries the id is the source-native id; isLazy()/resolveLazy()
-            // re-resolves by webpageUrl in that case.
             String videoId = id.equals("NA") ? "" : id;
 
             entries.add(AudioReference.lazy(title, uploader, durationMillis, videoId, pageUrl));
@@ -169,20 +174,67 @@ public final class YtDlpFallback {
         if (youTubeTarget) {
             throwIfBreakerOpen();
         }
+        String stdout = runWithRetry(b -> command(target, b), youTubeTarget, target);
+        AudioReference resolved = parse(stdout, query);
+        if (youTubeTarget) {
+            // Cookies / proxy / pure luck are working again — let later calls retry.
+            botChallengeUntil.set(0L);
+        }
+        return resolved;
+    }
+
+    // ---------------- retry harness ----------------
+
+    @FunctionalInterface
+    private interface CommandBuilder {
+        List<String> build(Attempt attempt);
+    }
+
+    private record Attempt(String impersonateTarget) {}
+
+    /**
+     * Runs the command with the rotation-and-retry strategy. For YouTube targets:
+     * try once with a random impersonate target; on a wall, try once more with a
+     * different target before tripping the breaker. For non-YouTube targets there
+     * is no breaker — but we still retry once on a transient failure, since the
+     * cost is one Python startup and the win is no user-visible flake.
+     */
+    private String runWithRetry(CommandBuilder builder, boolean youTubeTarget, String describable) {
+        String firstTarget = randomImpersonate(null);
         try {
-            AudioReference resolved = parse(runYtDlp(command(target)), query);
-            if (youTubeTarget) {
-                // Cookies (or chance) are working again — let later calls retry.
-                botChallengeUntil.set(0L);
+            String out = runYtDlp(builder.build(new Attempt(firstTarget)));
+            log.debug("[yt-dlp] ok target={} target_for={}", firstTarget, describable);
+            return out;
+        } catch (BotChallengeException firstWall) {
+            String secondTarget = randomImpersonate(firstTarget);
+            log.info("[yt-dlp] wall hit with impersonate={} — retrying with {}", firstTarget, secondTarget);
+            try {
+                String out = runYtDlp(builder.build(new Attempt(secondTarget)));
+                log.info("[yt-dlp] retry succeeded with impersonate={}", secondTarget);
+                return out;
+            } catch (BotChallengeException secondWall) {
+                if (youTubeTarget) {
+                    tripBreaker();
+                }
+                throw secondWall;
             }
-            return resolved;
-        } catch (BotChallengeException e) {
-            if (youTubeTarget) {
-                tripBreaker();
-            }
-            throw e;
+        } catch (YoutubeSourceException nonWall) {
+            // Non-wall failures don't get a fingerprint-retry — they're usually
+            // "video unavailable" or similar, which a fresh client won't fix.
+            throw nonWall;
         }
     }
+
+    private static String randomImpersonate(String avoid) {
+        if (IMPERSONATE_POOL.size() == 1) return IMPERSONATE_POOL.get(0);
+        for (int i = 0; i < 8; i++) {
+            String pick = IMPERSONATE_POOL.get(ThreadLocalRandom.current().nextInt(IMPERSONATE_POOL.size()));
+            if (!pick.equals(avoid)) return pick;
+        }
+        return IMPERSONATE_POOL.get(0);
+    }
+
+    // ---------------- process runner ----------------
 
     private String runYtDlp(List<String> command) {
         Process process;
@@ -222,7 +274,7 @@ public final class YtDlpFallback {
                 // Don't surface the multi-line yt-dlp paragraph to the user — the UI
                 // layer renders a stable friendly message for this exception type.
                 throw new BotChallengeException(
-                        "YouTube served the bot-detection wall (cookies missing or expired)");
+                        "YouTube served the bot-detection wall");
             }
             throw new YoutubeSourceException("yt-dlp failed: " + detail);
         }
@@ -232,8 +284,11 @@ public final class YtDlpFallback {
     private static boolean isBotWall(String stderrText) {
         if (stderrText == null || stderrText.isEmpty()) return false;
         String lower = stderrText.toLowerCase(Locale.ROOT);
-        // Match both straight and curly apostrophe variants yt-dlp emits.
-        return lower.contains("sign in to confirm") && lower.contains("not a bot");
+        // Multiple variants the wall can show as.
+        return (lower.contains("sign in to confirm") && lower.contains("not a bot"))
+                || lower.contains("http error 403")
+                || lower.contains("confirm you")
+                || lower.contains("requires authentication");
     }
 
     private static boolean isYouTubeTarget(String target) {
@@ -258,22 +313,15 @@ public final class YtDlpFallback {
     private void tripBreaker() {
         long until = System.currentTimeMillis() + BOT_CHALLENGE_BACKOFF_MILLIS;
         botChallengeUntil.set(until);
-        log.warn("[yt-dlp] YouTube bot wall hit — pausing YouTube fallback for {}s",
+        log.warn("[yt-dlp] YouTube bot wall persisted across two impersonate targets — pausing YouTube fallback for {}s",
                 BOT_CHALLENGE_BACKOFF_MILLIS / 1000L);
     }
 
-    private List<String> command(String target) {
-        // One --print per field; yt-dlp emits them as lines in this exact order.
-        List<String> cmd = new ArrayList<>(24);
-        cmd.add(ytDlpPath);
-        cmd.add("--ignore-config");
+    // ---------------- command builders ----------------
+
+    private List<String> command(String target, Attempt attempt) {
+        List<String> cmd = newBaseCommand(attempt);
         cmd.add("--no-playlist");
-        cmd.add("--no-warnings");
-        cmd.add("--quiet");
-        cmd.add("--sleep-requests"); cmd.add("1");
-        cmd.add("--extractor-args"); cmd.add(YOUTUBE_EXTRACTOR_ARGS);
-        cmd.add("--impersonate"); cmd.add(IMPERSONATE_TARGET);
-        appendCookiesArg(cmd);
         cmd.add("--print"); cmd.add("title");
         cmd.add("--print"); cmd.add("url");
         cmd.add("--print"); cmd.add("duration");
@@ -285,19 +333,9 @@ public final class YtDlpFallback {
         return cmd;
     }
 
-    private List<String> playlistCommand(String playlistUrl) {
-        // --flat-playlist makes yt-dlp list entries without resolving each one — fast
-        // even for huge playlists. Five --print fields per entry, in fixed order.
-        List<String> cmd = new ArrayList<>(20);
-        cmd.add(ytDlpPath);
-        cmd.add("--ignore-config");
+    private List<String> playlistCommand(String playlistUrl, Attempt attempt) {
+        List<String> cmd = newBaseCommand(attempt);
         cmd.add("--flat-playlist");
-        cmd.add("--no-warnings");
-        cmd.add("--quiet");
-        cmd.add("--sleep-requests"); cmd.add("1");
-        cmd.add("--extractor-args"); cmd.add(YOUTUBE_EXTRACTOR_ARGS);
-        cmd.add("--impersonate"); cmd.add(IMPERSONATE_TARGET);
-        appendCookiesArg(cmd);
         cmd.add("--print"); cmd.add("id");
         cmd.add("--print"); cmd.add("title");
         cmd.add("--print"); cmd.add("duration");
@@ -307,12 +345,59 @@ public final class YtDlpFallback {
         return cmd;
     }
 
+    /**
+     * Builds the shared flag set every call uses: process-hardening flags
+     * (--ignore-config, --no-warnings, --quiet, retry/timeout), the chosen
+     * impersonate target, the cookie-aware client order if cookies are present,
+     * optional proxy / PoToken, and the cookies file.
+     */
+    private List<String> newBaseCommand(Attempt attempt) {
+        List<String> cmd = new ArrayList<>(32);
+        cmd.add(ytDlpPath);
+        // --ignore-config: never read /etc/yt-dlp.conf or ~/.config/yt-dlp/ — our
+        // production environment is exactly what's on this command line.
+        cmd.add("--ignore-config");
+        cmd.add("--no-warnings");
+        cmd.add("--quiet");
+        // Add jitter and bound transient timeouts so we don't waste the full 25 s
+        // process budget waiting on a single hung socket.
+        cmd.add("--sleep-requests"); cmd.add("1");
+        cmd.add("--socket-timeout"); cmd.add("15");
+        cmd.add("--retries"); cmd.add("3");
+        // Spoof a Chrome User-Agent at the HTTP layer too — curl_cffi handles TLS,
+        // but plain headers still get inspected.
+        cmd.add("--user-agent"); cmd.add(STREAM_USER_AGENT);
+        // Client/extractor args: cookie-aware order if we have cookies, otherwise
+        // tv_embedded-led order (more resilient on anon datacenter IPs).
+        cmd.add("--extractor-args"); cmd.add(buildExtractorArgs());
+        // TLS / HTTP/2 fingerprint masquerade. Rotates per call (and per retry).
+        cmd.add("--impersonate"); cmd.add(attempt.impersonateTarget());
+        if (!proxy.isBlank()) {
+            cmd.add("--proxy"); cmd.add(proxy);
+        }
+        appendCookiesArg(cmd);
+        return cmd;
+    }
+
+    private String buildExtractorArgs() {
+        String clients = cookiesPath.isBlank() ? ANON_CLIENTS : COOKIED_CLIENTS;
+        StringBuilder sb = new StringBuilder("youtube:player_client=").append(clients);
+        if (!poToken.isBlank()) {
+            // yt-dlp accepts a per-client PoToken via po_token=<client>.<context>+<token>.
+            // mweb.gvs is the broadly-applicable choice for non-web clients.
+            sb.append(";po_token=mweb.gvs+").append(poToken);
+        }
+        return sb.toString();
+    }
+
     private void appendCookiesArg(List<String> cmd) {
         if (!cookiesPath.isBlank()) {
             cmd.add("--cookies");
             cmd.add(cookiesPath);
         }
     }
+
+    // ---------------- output parsing ----------------
 
     private AudioReference parse(String stdout, String originalQuery) {
         String[] line = stdout.strip().split("\\r?\\n");
@@ -375,5 +460,18 @@ public final class YtDlpFallback {
     private static boolean looksLikeUrl(String s) {
         String lower = s.strip().toLowerCase(Locale.ROOT);
         return lower.startsWith("http://") || lower.startsWith("https://");
+    }
+
+    /**
+     * Best-effort proxy string redaction for log lines — keeps the host:port so the
+     * operator can tell *which* proxy was chosen, drops the userinfo so credentials
+     * never land in CloudWatch.
+     */
+    private static String redact(String url) {
+        int at = url.lastIndexOf('@');
+        if (at < 0) return url;
+        int scheme = url.indexOf("://");
+        if (scheme < 0) return "***@" + url.substring(at + 1);
+        return url.substring(0, scheme + 3) + "***@" + url.substring(at + 1);
     }
 }

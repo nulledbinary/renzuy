@@ -26,9 +26,6 @@ public final class Embeds {
             "https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f44b.png";
     private static final String GEAR_ICON =
             "https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/2699.png";
-    private static final String PERSON_ICON =
-            "https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f464.png";
-
     private Embeds() {}
 
     public static MessageEmbed playing(String title) {
@@ -123,25 +120,6 @@ public final class Embeds {
                 .setAuthor("Prefix updated", null, GEAR_ICON)
                 .setDescription("Text commands now respond to `" + newPrefix + "`.")
                 .build();
-    }
-
-    /** Renders the full user-profile card used by {@code /info} and {@code <prefix>info}. */
-    public static MessageEmbed userInfo(
-            String username, String userId, boolean bot, String avatarUrl,
-            String joinedDiscord, String joinedServer, String displayName,
-            String roles, String status, long replyLatencyMillis) {
-        EmbedBuilder b = new EmbedBuilder()
-                .setColor(INFO)
-                .setAuthor(username + (bot ? " (bot)" : ""), null, PERSON_ICON)
-                .setThumbnail(avatarUrl)
-                .addField("Display name", escape(displayName), true)
-                .addField("User ID", "`" + userId + "`", true)
-                .addField("Status", status, true)
-                .addField("Joined Discord on", joinedDiscord, true)
-                .addField("Joined Server on", joinedServer, true)
-                .addField("Roles", roles, false)
-                .setFooter("Ran for " + replyLatencyMillis + " ms");
-        return b.build();
     }
 
     private static String escape(String s) {
