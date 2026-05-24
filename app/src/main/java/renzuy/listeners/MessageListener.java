@@ -12,14 +12,7 @@ import org.jetbrains.annotations.NotNull;
 
 public final class MessageListener extends ListenerAdapter {
 
-    private static final List<String> PROTECTED_IDS = List.of("1307406457242910875", "1405889030628970496");
-
-    /**
-     * Users who are exempt from the tag-scolding when they mention a protected user.
-     * Distinct from {@link #PROTECTED_IDS} — these users are not "protected" themselves;
-     * the bot simply ignores their tags of protected users instead of scolding them.
-     */
-    private static final List<String> IMMUNE_IDS = List.of("949132068791668776");
+    private static final List<String> PROTECTED_IDS = List.of("1506888836481810534");
 
     private static final List<String> TAG_SCOLD_REPLIES = List.of(
             "Tang ina mo wag mo i-tag 'yan, %s",
@@ -77,10 +70,6 @@ public final class MessageListener extends ListenerAdapter {
      * replies with a random scolding line and returns {@code true}.
      */
     private boolean scoldsForTaggingProtectedUser(MessageReceivedEvent event, Message message, String authorMention) {
-        String authorId = event.getAuthor().getId();
-        if (PROTECTED_IDS.contains(authorId) || IMMUNE_IDS.contains(authorId)) {
-            return false;
-        }
 
         boolean taggedProtectedUser = message.getMentions().getUsers().stream()
                 .map(User::getId)
