@@ -30,11 +30,12 @@ FROM eclipse-temurin:25-jre-noble
 # --break-system-packages is needed on Ubuntu 24.04 (Noble): PEP 668 marks the
 # system Python externally-managed, but the container image *is* the environment
 # so a system-wide install is the intended placement.
-RUN apt-get update \
+RUN set -eux \
+ && apt-get update \
  && apt-get install -y --no-install-recommends ffmpeg python3 python3-pip ca-certificates \
- && pip install --no-cache-dir --break-system-packages "yt-dlp[default,curl-cffi]" \
+ && python3 -m pip install --no-cache-dir --break-system-packages "yt-dlp[default,curl-cffi]" \
  && yt-dlp --version \
- && yt-dlp --list-impersonate-targets | grep -q '^chrome' \
+ && yt-dlp --list-impersonate-targets | grep -qi chrome \
  && rm -rf /var/lib/apt/lists/* /root/.cache
 
 RUN useradd --create-home --shell /usr/sbin/nologin --uid 10001 renzuy
