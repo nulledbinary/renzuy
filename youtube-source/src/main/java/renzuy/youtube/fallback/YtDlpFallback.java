@@ -41,23 +41,32 @@ public final class YtDlpFallback {
      * almost never lifts within seconds — backing off avoids spamming both YouTube
      * and the user while the wall is up. Non-YouTube targets (Spotify / SoundCloud
      * / direct URLs) are unaffected by the breaker.
+     *
+     * <p>Sized for the impersonation + cookies era: transient walls now usually
+     * lift within tens of seconds (curl_cffi gets us past the TLS fingerprint
+     * check on retry), so a 90-second backoff balances "give YouTube room to
+     * cool off" against "don't punish users for a one-off blip."
      */
-    private static final long BOT_CHALLENGE_BACKOFF_MILLIS = 5L * 60L * 1000L;
+    private static final long BOT_CHALLENGE_BACKOFF_MILLIS = 90L * 1000L;
 
     /**
-     * Tells yt-dlp which Innertube clients to ask. The {@code web} and {@code android}
-     * clients have started demanding a GVS PoToken (and the bot-detection wall) when
-     * the request comes from a datacenter IP (AWS, GCP, ...). The clients here have
-     * historically replied to anonymous requests from cloud IPs without demanding
-     * cookies or a PoToken; {@code tv} (the Smart TV YouTube app) has been the most
-     * resilient through 2025–2026, with {@code tv_embedded} and {@code android_vr}
-     * (Oculus) as backups. Order matters — yt-dlp tries them left-to-right.
+     * Tells yt-dlp which Innertube clients to ask. yt-dlp tries them left-to-right
+     * and stops on the first that returns a playable response — so order is policy.
      *
-     * <p>If even these trip the wall (it happens for some videos / from some egress
-     * IPs), set {@code YT_DLP_COOKIES} so yt-dlp can present an authenticated session.
+     * <p>{@code mweb} (mobile web) is first because it is the cookie-aware client
+     * in this list: when the operator has injected {@code YT_DLP_COOKIES}, mweb
+     * actually presents the session to YouTube and the bot wall stays closed.
+     * The TV-family clients ({@code tv_embedded}, {@code android_vr}, {@code tv})
+     * use a separate device-auth path that ignores web cookies; they are kept as
+     * fallback because they remain resilient against anonymous bot-detection
+     * even when cookies are absent or expired.
+     *
+     * <p>{@code web} and {@code android} are deliberately omitted — both demand
+     * a GVS PoToken from datacenter IPs and trip the wall on almost every
+     * request without one.
      */
     private static final String YOUTUBE_EXTRACTOR_ARGS =
-            "youtube:player_client=tv,tv_embedded,android_vr,mweb";
+            "youtube:player_client=mweb,tv_embedded,android_vr,tv";
 
     /**
      * yt-dlp's {@code --impersonate} target. Uses curl_cffi under the hood to emit
@@ -255,11 +264,13 @@ public final class YtDlpFallback {
 
     private List<String> command(String target) {
         // One --print per field; yt-dlp emits them as lines in this exact order.
-        List<String> cmd = new ArrayList<>(20);
+        List<String> cmd = new ArrayList<>(24);
         cmd.add(ytDlpPath);
+        cmd.add("--ignore-config");
         cmd.add("--no-playlist");
         cmd.add("--no-warnings");
         cmd.add("--quiet");
+        cmd.add("--sleep-requests"); cmd.add("1");
         cmd.add("--extractor-args"); cmd.add(YOUTUBE_EXTRACTOR_ARGS);
         cmd.add("--impersonate"); cmd.add(IMPERSONATE_TARGET);
         appendCookiesArg(cmd);
@@ -277,11 +288,13 @@ public final class YtDlpFallback {
     private List<String> playlistCommand(String playlistUrl) {
         // --flat-playlist makes yt-dlp list entries without resolving each one — fast
         // even for huge playlists. Five --print fields per entry, in fixed order.
-        List<String> cmd = new ArrayList<>(16);
+        List<String> cmd = new ArrayList<>(20);
         cmd.add(ytDlpPath);
+        cmd.add("--ignore-config");
         cmd.add("--flat-playlist");
         cmd.add("--no-warnings");
         cmd.add("--quiet");
+        cmd.add("--sleep-requests"); cmd.add("1");
         cmd.add("--extractor-args"); cmd.add(YOUTUBE_EXTRACTOR_ARGS);
         cmd.add("--impersonate"); cmd.add(IMPERSONATE_TARGET);
         appendCookiesArg(cmd);
