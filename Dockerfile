@@ -62,6 +62,11 @@ ENV APP_ENV=production \
     YT_DLP_COOKIES=/home/renzuy/app/config/youtube-cookies.txt \
     YT_DLP_POT_PROVIDER_URL=http://localhost:4416
 
-RUN mkdir -p /home/renzuy/app/config && chmod +x /home/renzuy/app/entrypoint.sh
+# Strip CR characters in case the source was uploaded from a Windows
+# checkout — `exec ./entrypoint.sh` fails with "no such file or directory"
+# on CRLF endings because the kernel looks up `/bin/sh\r` as the interpreter.
+RUN mkdir -p /home/renzuy/app/config \
+ && sed -i 's/\r$//' /home/renzuy/app/entrypoint.sh \
+ && chmod +x /home/renzuy/app/entrypoint.sh
 
 ENTRYPOINT ["./entrypoint.sh"]
