@@ -34,9 +34,17 @@ RUN set -eux \
  && apt-get update \
  && apt-get install -y --no-install-recommends ffmpeg python3 python3-pip ca-certificates \
  && python3 -m pip install --no-cache-dir --break-system-packages "yt-dlp[default,curl-cffi]" \
+ && python3 -m pip install --no-cache-dir --break-system-packages bgutil-ytdlp-pot-provider \
  && yt-dlp --version \
  && yt-dlp --list-impersonate-targets | grep -qi chrome \
  && rm -rf /var/lib/apt/lists/* /root/.cache
+
+# bgutil-ytdlp-pot-provider is the yt-dlp plugin that talks to a PoToken
+# provider over HTTP and inserts the resulting GVS PoToken into the Innertube
+# request. The provider itself runs as a sidecar container in the ECS task
+# (brainicism/bgutil-ytdlp-pot-provider) — both containers share the task's
+# network namespace under awsvpc, so the plugin reaches it at localhost:4416.
+# YT_DLP_POT_PROVIDER_URL is read by the Java layer and propagated to yt-dlp.
 
 RUN useradd --create-home --shell /usr/sbin/nologin --uid 10001 renzuy
 USER renzuy
@@ -51,7 +59,8 @@ COPY --chown=renzuy:renzuy entrypoint.sh /home/renzuy/app/entrypoint.sh
 ENV APP_ENV=production \
     JAVA_TOOL_OPTIONS="--enable-native-access=ALL-UNNAMED" \
     RENZUY_CONFIG_DIR=/home/renzuy/app/config \
-    YT_DLP_COOKIES=/home/renzuy/app/config/youtube-cookies.txt
+    YT_DLP_COOKIES=/home/renzuy/app/config/youtube-cookies.txt \
+    YT_DLP_POT_PROVIDER_URL=http://localhost:4416
 
 RUN mkdir -p /home/renzuy/app/config && chmod +x /home/renzuy/app/entrypoint.sh
 

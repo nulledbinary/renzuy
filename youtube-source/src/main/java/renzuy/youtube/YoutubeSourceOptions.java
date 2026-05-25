@@ -23,6 +23,12 @@ import java.time.Duration;
  * @param ytDlpPoToken    GVS PoToken passed via {@code --extractor-args
  *                        youtube:po_token=mweb.gvs+TOKEN}; blank/null disables.
  *                        Lasts roughly 24 h before YouTube rotates it.
+ * @param ytDlpPotProviderUrl URL of a bgutil-ytdlp-pot-provider HTTP service.
+ *                        When set, the yt-dlp plugin (installed in the image)
+ *                        calls this endpoint to mint a fresh PoToken per call —
+ *                        the AWS-native alternative to a static {@code po_token}
+ *                        or a residential proxy. Bypasses YouTube's IP scoring
+ *                        without a tracked session.
  * @param verifyStreamUrl probe the chosen CDN URL with a 1-byte ranged GET before
  *                        returning it — costs one short round trip, but guarantees
  *                        the bot never starts ffmpeg against a dead URL
@@ -38,6 +44,7 @@ public record YoutubeSourceOptions(
         String ytDlpCookiesPath,
         String ytDlpProxy,
         String ytDlpPoToken,
+        String ytDlpPotProviderUrl,
         boolean verifyStreamUrl,
         boolean prewarmOnStart) {
 
@@ -60,6 +67,7 @@ public record YoutubeSourceOptions(
         private String ytDlpCookiesPath = "";
         private String ytDlpProxy = "";
         private String ytDlpPoToken = "";
+        private String ytDlpPotProviderUrl = "";
         private boolean verifyStreamUrl = true;
         private boolean prewarmOnStart = true;
 
@@ -72,6 +80,7 @@ public record YoutubeSourceOptions(
         public Builder ytDlpCookiesPath(String v) { this.ytDlpCookiesPath = v == null ? "" : v; return this; }
         public Builder ytDlpProxy(String v) { this.ytDlpProxy = v == null ? "" : v; return this; }
         public Builder ytDlpPoToken(String v) { this.ytDlpPoToken = v == null ? "" : v; return this; }
+        public Builder ytDlpPotProviderUrl(String v) { this.ytDlpPotProviderUrl = v == null ? "" : v; return this; }
         public Builder verifyStreamUrl(boolean v) { this.verifyStreamUrl = v; return this; }
         public Builder prewarmOnStart(boolean v) { this.prewarmOnStart = v; return this; }
 
@@ -79,7 +88,7 @@ public record YoutubeSourceOptions(
             return new YoutubeSourceOptions(
                     connectTimeout, requestTimeout, cacheTtl, cacheMaxEntries,
                     fallbackEnabled, ytDlpPath, ytDlpCookiesPath, ytDlpProxy, ytDlpPoToken,
-                    verifyStreamUrl, prewarmOnStart);
+                    ytDlpPotProviderUrl, verifyStreamUrl, prewarmOnStart);
         }
     }
 }
