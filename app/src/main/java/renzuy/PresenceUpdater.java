@@ -49,7 +49,7 @@ public final class PresenceUpdater {
             System.out.println("[Presence] Production mode — status refreshes every "
                     + REFRESH_INTERVAL_MINUTES + " min");
         } else {
-            jda.getPresence().setPresence(OnlineStatus.DO_NOT_DISTURB,
+            jda.getPresence().setPresence(OnlineStatus.IDLE,
                     Activity.customStatus("Undergoing Rough Maintenance"));
             System.out.println("[Presence] Development mode — status set to 'Undergoing Rough Maintenance'");
         }
@@ -66,8 +66,8 @@ public final class PresenceUpdater {
             long total = jda.getGuilds().stream()
                     .mapToLong(g -> g.getMemberCount())
                     .sum();
-            String text = "Inaalipin ang mga " + NUMBER_FORMAT.format(total);
-            jda.getPresence().setPresence(OnlineStatus.ONLINE, Activity.customStatus(text));
+            String text = "Inaalipin ng mga " + NUMBER_FORMAT.format(total) + " Kuneho";
+            jda.getPresence().setPresence(OnlineStatus.IDLE, Activity.customStatus(text));
         } catch (Exception e) {
             System.err.println("[Presence] Failed to refresh status: " + e.getMessage());
         }

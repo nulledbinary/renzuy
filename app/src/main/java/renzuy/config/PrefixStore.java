@@ -20,10 +20,10 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public final class PrefixStore {
 
-    public static final String DEFAULT_PREFIX = "!";
+    public static final String DEFAULT_PREFIX = "§";
 
-    /** Allowed prefix characters — single ASCII special character. */
-    private static final String ALLOWED = "!@#$%^&*?.,;:~+-=<>|/\\";
+    /** Allowed prefix characters — single special character (ASCII plus §). */
+    private static final String ALLOWED = "!@#$%^&*?.,;:~+-=<>|/\\§";
 
     private final Path file;
     private final Map<Long, String> prefixes = new ConcurrentHashMap<>();

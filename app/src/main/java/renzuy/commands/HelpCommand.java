@@ -1,9 +1,14 @@
 package renzuy.commands;
 
+import java.awt.Color;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
+import net.dv8tion.jda.api.EmbedBuilder;
 import net.dv8tion.jda.api.entities.Guild;
 import net.dv8tion.jda.api.entities.Member;
+import net.dv8tion.jda.api.entities.MessageEmbed;
+import net.dv8tion.jda.api.entities.User;
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent;
 import net.dv8tion.jda.api.events.message.MessageReceivedEvent;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
@@ -12,45 +17,44 @@ import renzuy.commands.text.TextCommand;
 import renzuy.config.PrefixStore;
 
 /**
- * {@code /help} (and {@code <prefix>help}): renders a plain-text command listing
- * filtered by what the invoking member can actually run.
+ * {@code /help} (and {@code <prefix>help}): renders a permission-filtered
+ * embed listing commands the invoking member can actually run.
  *
- * <p>Output is plain content (no embed) so the format renders identically across
- * mobile/desktop/web and stays grep-friendly. Three sections:
- * <ol>
- *   <li><b>Available commands</b> — everything {@link Capability#EVERYONE} grants;
- *       shown to every invocation.</li>
- *   <li><b>Management commands</b> — anything the member has at least one
- *       moderation capability for. Hidden entirely if the member has none.</li>
- *   <li><b>Administrative</b> — server-config commands (prefix, log binding);
- *       hidden unless the member has the matching permission.</li>
- * </ol>
+ * <p>Slash invocation is ephemeral — only the caller sees it. Prefix invocation
+ * cannot be ephemeral (messages can't), so to honour the "others shouldn't see
+ * commands they can't run" rule the bot DMs the embed to the caller, deletes
+ * the invoking message, and posts a short in-channel acknowledgement that
+ * auto-deletes after a few seconds.
  */
 public final class HelpCommand extends ListenerAdapter implements TextCommand {
 
     public static final String NAME = "help";
+    private static final Color HELP_COLOR = new Color(0x5865F2);
+    private static final long ACK_AUTO_DELETE_SECONDS = 8L;
 
     private record Entry(String usage, String description, Capability capability) {}
 
     private static final List<Entry> GENERAL = List.of(
-            new Entry("help",                 "Show this list",                                       Capability.EVERYONE),
-            new Entry("play <query>",         "Play a track, search term, or playlist URL",           Capability.EVERYONE),
-            new Entry("stop",                 "Stop playback and clear the queue",                    Capability.EVERYONE),
-            new Entry("skip",                 "Skip the current song",                                Capability.EVERYONE),
-            new Entry("queue",                "Show the queue (paging buttons on slash version)",     Capability.EVERYONE),
-            new Entry("remove <position>",    "Remove a track from the queue by its number",          Capability.EVERYONE),
-            new Entry("info [user]",          "Detailed account / server info for a user",            Capability.EVERYONE)
+            new Entry("help", "Show this list", Capability.EVERYONE),
+            new Entry("play <query>", "Play a track, search term, or playlist URL", Capability.EVERYONE),
+            new Entry("stop", "Stop playback and clear the queue", Capability.EVERYONE),
+            new Entry("skip", "Skip the current song", Capability.EVERYONE),
+            new Entry("queue", "Show the queue (paging buttons on slash version)", Capability.EVERYONE),
+            new Entry("remove <position>", "Remove a track from the queue by its number", Capability.EVERYONE),
+            new Entry("info [user]", "Detailed account / server info for a user", Capability.EVERYONE),
+            new Entry("afk [reason]", "Mark yourself AFK — reason may include an image/GIF URL", Capability.EVERYONE)
     );
 
     private static final List<Entry> MANAGEMENT = List.of(
-            new Entry("purge <count>",                    "Bulk-delete up to 100 recent messages",          Capability.PURGE_MESSAGES),
-            new Entry("tempmute <user> <duration>",       "Discord timeout — e.g. 30s, 15m, 2h, 7d",        Capability.TIMEOUT_MEMBERS),
-            new Entry("tempban <user> <duration>",        "Ban with scheduled auto-unban",                  Capability.BAN_MEMBERS),
-            new Entry("log",                              "Bind this channel as the server event log",      Capability.VIEW_LOGS)
+            new Entry("purge <count>", "Bulk-delete up to 100 recent messages", Capability.PURGE_MESSAGES),
+            new Entry("tempmute <user> <duration>", "Discord timeout — e.g. 30s, 15m, 2h, 7d", Capability.TIMEOUT_MEMBERS),
+            new Entry("tempban <user> <duration>", "Ban with scheduled auto-unban", Capability.BAN_MEMBERS),
+            new Entry("log", "Bind this channel as the server event log", Capability.VIEW_LOGS),
+            new Entry("hatewarn <count> <punishment>", "Configure warnings threshold + punishment for hate-speech (slash only)", Capability.TIMEOUT_MEMBERS)
     );
 
     private static final List<Entry> ADMIN = List.of(
-            new Entry("prefix <char>",        "Change the text-command prefix (slash only)",          Capability.MANAGE_PREFIX)
+            new Entry("prefix <char>", "Change the text-command prefix (slash only)", Capability.MANAGE_PREFIX)
     );
 
     private final PrefixStore prefixes;
@@ -69,42 +73,68 @@ public final class HelpCommand extends ListenerAdapter implements TextCommand {
         if (!event.getName().equals(NAME)) return;
         Guild guild = event.getGuild();
         String prefix = guild != null ? prefixes.get(guild.getIdLong()) : PrefixStore.DEFAULT_PREFIX;
-        String body = render(event.getMember(), prefix);
-        event.reply(body).setEphemeral(true).queue();
+        MessageEmbed embed = render(event.getMember(), prefix);
+        event.replyEmbeds(embed).setEphemeral(true).queue();
     }
 
     @Override
     public void execute(MessageReceivedEvent event, String args) {
         String prefix = prefixes.get(event.getGuild().getIdLong());
-        String body = render(event.getMember(), prefix);
-        event.getChannel().sendMessage(body).queue();
+        Member member = event.getMember();
+        User author = event.getAuthor();
+        MessageEmbed embed = render(member, prefix);
+
+        author.openPrivateChannel().queue(
+                dm -> dm.sendMessageEmbeds(embed).queue(
+                        sent -> {
+                            event.getMessage().delete().queue(v -> {}, e -> {});
+                            event.getChannel().sendMessage(
+                                    author.getAsMention() + " — check your DMs for the command list.")
+                                    .queue(msg -> msg.delete().queueAfter(
+                                            ACK_AUTO_DELETE_SECONDS, TimeUnit.SECONDS, v -> {}, e -> {}),
+                                            e -> {});
+                        },
+                        err -> fallbackInChannel(event, embed, author)),
+                err -> fallbackInChannel(event, embed, author));
     }
 
-    /**
-     * Renders the command listing filtered to what {@code member} can actually
-     * invoke. Plain Markdown, no embed; sections are hidden entirely when the
-     * member has no commands in them, so an unprivileged user sees only the
-     * music block.
-     */
-    static String render(Member member, String prefix) {
-        StringBuilder out = new StringBuilder(512);
-        out.append("**Available commands**\n");
-        appendSection(out, GENERAL, member, prefix);
+    /** DMs failed (closed DMs) — post the embed in channel and self-destruct it. */
+    private static void fallbackInChannel(MessageReceivedEvent event, MessageEmbed embed, User author) {
+        event.getChannel().sendMessage("DMs closed — temporary in-channel listing for "
+                        + author.getAsMention())
+                .addEmbeds(embed)
+                .queue(msg -> msg.delete().queueAfter(20L, TimeUnit.SECONDS, v -> {}, e -> {}),
+                        e -> {});
+        event.getMessage().delete().queue(v -> {}, e -> {});
+    }
 
-        List<Entry> mgmt = filtered(MANAGEMENT, member);
-        if (!mgmt.isEmpty()) {
-            out.append("\n**Management commands**\n");
-            appendSection(out, mgmt, member, prefix);
+    /** Renders the embed with sections hidden for capabilities the member lacks. */
+    static MessageEmbed render(Member member, String prefix) {
+        EmbedBuilder b = new EmbedBuilder()
+                .setColor(HELP_COLOR)
+                .setAuthor("Commands available to you", null,
+                        member != null ? member.getUser().getEffectiveAvatarUrl() : null)
+                .setDescription("Each command can be invoked with `/` (slash) or with the text prefix `"
+                        + prefix + "`.\nCommands you don't have permission to run are hidden.");
+
+        appendField(b, "General", GENERAL, member, prefix);
+        appendField(b, "Management", MANAGEMENT, member, prefix);
+        appendField(b, "Administrative", ADMIN, member, prefix);
+
+        b.setFooter("Current text prefix: " + prefix);
+        return b.build();
+    }
+
+    private static void appendField(EmbedBuilder b, String title, List<Entry> entries, Member member, String prefix) {
+        List<Entry> usable = filtered(entries, member);
+        if (usable.isEmpty()) return;
+        StringBuilder body = new StringBuilder(usable.size() * 64);
+        for (Entry e : usable) {
+            body.append("`/").append(e.usage()).append("` · `")
+                    .append(prefix).append(e.usage()).append("`\n— ")
+                    .append(e.description()).append('\n');
         }
-
-        List<Entry> admin = filtered(ADMIN, member);
-        if (!admin.isEmpty()) {
-            out.append("\n**Administrative**\n");
-            appendSection(out, admin, member, prefix);
-        }
-
-        out.append("\nCurrent text prefix: `").append(prefix).append('`');
-        return out.toString();
+        b.addField(title, body.toString(), false);
     }
 
     private static List<Entry> filtered(List<Entry> entries, Member member) {
@@ -115,14 +145,5 @@ public final class HelpCommand extends ListenerAdapter implements TextCommand {
             }
         }
         return out;
-    }
-
-    private static void appendSection(StringBuilder out, List<Entry> entries, Member member, String prefix) {
-        for (Entry entry : entries) {
-            if (!entry.capability().grantedTo(member)) continue;
-            out.append("> `/").append(entry.usage()).append("`  or  `")
-                    .append(prefix).append(entry.usage()).append("` — ")
-                    .append(entry.description()).append('\n');
-        }
     }
 }

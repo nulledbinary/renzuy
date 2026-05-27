@@ -32,14 +32,20 @@ public final class MusicService {
         //                      reliable fix on Fargate egress IPs.
         //   YT_DLP_PO_TOKEN  — GVS PoToken from a real browser session; satisfies
         //                      YouTube's anti-bot without a tracked login.
-        String cookiesPath = DotEnv.get("YT_DLP_COOKIES");
-        String proxy       = DotEnv.get("YT_DLP_PROXY");
-        String poToken     = DotEnv.get("YT_DLP_PO_TOKEN");
+        //   YT_DLP_POT_PROVIDER_URL — URL of a bgutil-ytdlp-pot-provider HTTP
+        //                      service (ECS sidecar). When set, the yt-dlp plugin
+        //                      mints a fresh PoToken per call — bypasses
+        //                      YouTube's IP scoring without a tracked session.
+        String cookiesPath    = DotEnv.get("YT_DLP_COOKIES");
+        String proxy          = DotEnv.get("YT_DLP_PROXY");
+        String poToken        = DotEnv.get("YT_DLP_PO_TOKEN");
+        String potProviderUrl = DotEnv.get("YT_DLP_POT_PROVIDER_URL");
         this.source = new YoutubeSource(YoutubeSourceOptions.builder()
                 .ytDlpPath(Binaries.YT_DLP)
                 .ytDlpCookiesPath(cookiesPath == null ? "" : cookiesPath)
                 .ytDlpProxy(proxy == null ? "" : proxy)
                 .ytDlpPoToken(poToken == null ? "" : poToken)
+                .ytDlpPotProviderUrl(potProviderUrl == null ? "" : potProviderUrl)
                 .build());
     }
 

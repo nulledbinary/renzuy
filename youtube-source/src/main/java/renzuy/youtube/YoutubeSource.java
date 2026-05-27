@@ -44,7 +44,8 @@ public final class YoutubeSource {
                 options.ytDlpPath(),
                 options.ytDlpCookiesPath(),
                 options.ytDlpProxy(),
-                options.ytDlpPoToken());
+                options.ytDlpPoToken(),
+                options.ytDlpPotProviderUrl());
         this.cache = new StreamCache(options.cacheTtl().toMillis(), options.cacheMaxEntries());
         if (options.prewarmOnStart()) {
             prewarm();
