@@ -4,17 +4,21 @@ import java.awt.Color;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Pattern;
 import net.dv8tion.jda.api.EmbedBuilder;
-import net.dv8tion.jda.api.Permission;
 import net.dv8tion.jda.api.entities.Guild;
 import net.dv8tion.jda.api.entities.Member;
 import net.dv8tion.jda.api.entities.User;
 import net.dv8tion.jda.api.entities.UserSnowflake;
+import net.dv8tion.jda.api.events.guild.member.GuildMemberJoinEvent;
+import net.dv8tion.jda.api.events.guild.member.update.GuildMemberUpdateNicknameEvent;
 import net.dv8tion.jda.api.events.message.MessageReceivedEvent;
+import net.dv8tion.jda.api.events.user.update.UserUpdateGlobalNameEvent;
+import net.dv8tion.jda.api.events.user.update.UserUpdateNameEvent;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
 import org.jetbrains.annotations.NotNull;
 import renzuy.commands.moderation.UnbanScheduler;
@@ -28,17 +32,28 @@ import renzuy.commands.moderation.UnbanScheduler;
  * <p>Detection runs against an aggressively normalized form of the message:
  * accents stripped, leetspeak digits and lookalike symbols folded back to
  * letters, all separators (spaces, dots, dashes) collapsed, then a list of
- * pattern stems is matched. This catches bypasses like {@code n1gg3rs},
- * {@code N.I.G.G.E.R}, {@code n i g g e r s}, {@code ｎｉｇｇｅｒ},
- * {@code retαrd}, etc.
+ * pattern stems is matched.
  *
- * <p>State (warning counts) is in-memory and resets on restart. Repeated
- * offenders inside a single uptime window still escalate predictably.
+ * <p>The same normalization + stem check is applied to every member's display
+ * name (server nickname, username, global name). If any name contains a banned
+ * stem the member is timed out for the maximum 28 days; the timeout is lifted
+ * automatically when they change to a clean name. Bot owner / administrators
+ * are NOT exempt — the only natural exemption is when the offender outranks
+ * the bot, in which case the timeout REST call fails silently and the
+ * message-delete backstop still removes anything they post.
+ *
+ * <p>State (warning counts, active name locks) is in-memory and resets on
+ * restart. Repeated offenders inside a single uptime window still escalate
+ * predictably; rejoining members are re-checked on join, and any existing
+ * member with a dirty name is caught the moment they send a message.
  */
 public final class AutoModerator extends ListenerAdapter {
 
     /** Composite key (guildId, userId) → warning count. */
     private final Map<Long, AtomicInteger> warnings = new ConcurrentHashMap<>();
+
+    /** Composite keys of members we have currently locked for a name violation. */
+    private final Set<Long> nameLocks = ConcurrentHashMap.newKeySet();
 
     private final HateWarnConfig config;
     private final UnbanScheduler unbanScheduler;
@@ -60,7 +75,6 @@ public final class AutoModerator extends ListenerAdapter {
             Pattern.compile("f+a+g+g+o+t+s?"),
             Pattern.compile("f+a+g+s"),
             Pattern.compile("d+y+k+e+s?"),
-            // English hatespeech.
             Pattern.compile("r+e+t+a+r+d+s?"),
             Pattern.compile("r+e+t+a+r+d+e+d"),
             Pattern.compile("m+o+n+g+o+l+o+i+d"),
@@ -77,20 +91,19 @@ public final class AutoModerator extends ListenerAdapter {
         if (!event.isFromGuild() || event.getAuthor().isBot()) return;
         Member member = event.getMember();
         if (member == null) return;
-        // Moderators get a free pass — assume intent is quoting/discussion.
-        if (member.hasPermission(Permission.MODERATE_MEMBERS, Permission.MESSAGE_MANAGE)
-                || member.hasPermission(Permission.ADMINISTRATOR)) return;
+        // No mod/admin bypass — automod applies to every member.
+
+        // Name lockout takes priority: if their nickname/username/global-name
+        // is dirty we drop the message and leave them in timeout.
+        if (checkNameViolation(member)) {
+            event.getMessage().delete().reason("AutoMod: name-lockout active").queue(v -> {}, e -> {});
+            return;
+        }
 
         String normalized = normalize(event.getMessage().getContentRaw());
         if (normalized.isEmpty()) return;
 
-        String hit = null;
-        for (Pattern p : STEMS) {
-            if (p.matcher(normalized).find()) {
-                hit = p.pattern();
-                break;
-            }
-        }
+        String hit = matchStem(normalized);
         if (hit == null) return;
 
         // Delete the offending message (best-effort).
@@ -120,6 +133,107 @@ public final class AutoModerator extends ListenerAdapter {
             applyPunishment(guild, event.getAuthor(), policy);
             warnings.remove(key);
         }
+    }
+
+    @Override
+    public void onGuildMemberJoin(@NotNull GuildMemberJoinEvent event) {
+        checkNameViolation(event.getMember());
+    }
+
+    @Override
+    public void onGuildMemberUpdateNickname(@NotNull GuildMemberUpdateNicknameEvent event) {
+        checkNameViolation(event.getMember());
+    }
+
+    @Override
+    public void onUserUpdateGlobalName(@NotNull UserUpdateGlobalNameEvent event) {
+        recheckEverywhere(event.getUser().getIdLong(), event.getJDA().getGuilds());
+    }
+
+    @Override
+    public void onUserUpdateName(@NotNull UserUpdateNameEvent event) {
+        recheckEverywhere(event.getUser().getIdLong(), event.getJDA().getGuilds());
+    }
+
+    private void recheckEverywhere(long userId, List<Guild> guilds) {
+        for (Guild g : guilds) {
+            Member m = g.getMemberById(userId);
+            if (m != null) checkNameViolation(m);
+        }
+    }
+
+    /**
+     * Checks every visible form of the member's name. Locks (timeout + tracking)
+     * the member when a banned stem is found; releases the lock when the name
+     * is clean again. Returns true if the member is currently locked.
+     */
+    private boolean checkNameViolation(Member member) {
+        if (member == null || member.getUser().isBot()) return false;
+        Guild guild = member.getGuild();
+        long key = compositeKey(guild.getIdLong(), member.getIdLong());
+        String hit = findNameHit(member);
+        boolean alreadyLocked = nameLocks.contains(key);
+
+        if (hit != null) {
+            if (!alreadyLocked) {
+                nameLocks.add(key);
+                if (guild.getSelfMember().canInteract(member)) {
+                    member.timeoutFor(Duration.ofDays(28))
+                            .reason("AutoMod: prohibited content in name (" + hit + ")")
+                            .queue(v -> {}, e -> {});
+                }
+                notifyNameLock(member, hit);
+            }
+            return true;
+        }
+
+        if (alreadyLocked) {
+            nameLocks.remove(key);
+            if (member.isTimedOut() && guild.getSelfMember().canInteract(member)) {
+                member.removeTimeout()
+                        .reason("AutoMod: name now clean")
+                        .queue(v -> {}, e -> {});
+            }
+        }
+        return false;
+    }
+
+    private static String findNameHit(Member member) {
+        String[] names = {
+                member.getEffectiveName(),
+                member.getNickname(),
+                member.getUser().getName(),
+                member.getUser().getGlobalName()
+        };
+        for (String n : names) {
+            if (n == null) continue;
+            String norm = normalize(n);
+            if (norm.isEmpty()) continue;
+            String stem = matchStem(norm);
+            if (stem != null) return stem;
+        }
+        return null;
+    }
+
+    private static String matchStem(String normalized) {
+        for (Pattern p : STEMS) {
+            if (p.matcher(normalized).find()) return p.pattern();
+        }
+        return null;
+    }
+
+    private static void notifyNameLock(Member member, String hit) {
+        Guild guild = member.getGuild();
+        EmbedBuilder b = new EmbedBuilder()
+                .setColor(new Color(0xED4245))
+                .setAuthor("Name violation in " + guild.getName(), null, guild.getIconUrl())
+                .setDescription("Your display name contains prohibited content and has been flagged. "
+                        + "You will be unable to talk in **" + guild.getName()
+                        + "** until you change your server nickname, username, or display name.")
+                .setFooter("Pattern: " + hit);
+        member.getUser().openPrivateChannel().queue(
+                dm -> dm.sendMessageEmbeds(b.build()).queue(v -> {}, e -> {}),
+                e -> {});
     }
 
     private void applyPunishment(Guild guild, User user, HateWarnConfig.Policy policy) {
