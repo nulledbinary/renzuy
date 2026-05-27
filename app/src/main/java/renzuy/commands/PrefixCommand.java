@@ -47,7 +47,7 @@ public final class PrefixCommand extends ListenerAdapter {
 
         if (!PrefixStore.isValid(candidate)) {
             event.replyEmbeds(Embeds.error(
-                    "Invalid prefix. Use **one** special character: `! @ # $ % ^ & * ? . , ; : ~ + - = < > | / \\`"))
+                    "Invalid prefix. Use **one** special character: `! @ # $ % ^ & * ? . , ; : ~ + - = < > | / \\ §`"))
                     .setEphemeral(true).queue();
             return;
         }

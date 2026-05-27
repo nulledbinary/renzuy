@@ -17,33 +17,19 @@ import net.dv8tion.jda.api.entities.Member;
  */
 public enum Capability {
 
-    /** Music + general commands everyone can use. */
     EVERYONE(),
-
-    /** Slash-only prefix changer — needs MANAGE_SERVER. */
     MANAGE_PREFIX(Permission.MANAGE_SERVER),
-
-    /** {@code /purge}: needs MESSAGE_MANAGE. */
     PURGE_MESSAGES(Permission.MESSAGE_MANAGE),
-
-    /** {@code /tempmute}: needs MODERATE_MEMBERS (the timeout perm). */
     TIMEOUT_MEMBERS(Permission.MODERATE_MEMBERS),
-
-    /** {@code /tempban}: needs BAN_MEMBERS. */
     BAN_MEMBERS(Permission.BAN_MEMBERS),
-
-    /** {@code /log}: needs VIEW_AUDIT_LOGS or MANAGE_SERVER. */
     VIEW_LOGS(Permission.VIEW_AUDIT_LOGS, Permission.MANAGE_SERVER);
 
     private final Set<Permission> any;
 
     Capability(Permission... permissions) {
-        this.any = permissions.length == 0
-                ? EnumSet.noneOf(Permission.class)
-                : EnumSet.copyOf(java.util.Arrays.asList(permissions));
+        this.any = permissions.length == 0 ? EnumSet.noneOf(Permission.class) : EnumSet.copyOf(java.util.Arrays.asList(permissions));
     }
 
-    /** True if {@code member} satisfies this capability (or it's universal). */
     public boolean grantedTo(Member member) {
         if (any.isEmpty()) return true;
         if (member == null) return false;

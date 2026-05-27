@@ -42,35 +42,30 @@ public final class TempMuteCommand extends ListenerAdapter {
         }
         Member moderator = event.getMember();
         if (!Capability.TIMEOUT_MEMBERS.grantedTo(moderator)) {
-            event.replyEmbeds(Embeds.warn("You need the **Timeout Members** permission to use `/tempmute`."))
-                    .setEphemeral(true).queue();
+            event.replyEmbeds(Embeds.warn("You need the **Timeout Members** permission to use `/tempmute`.")).setEphemeral(true).queue();
             return;
         }
 
         OptionMapping userOpt = event.getOption(USER_OPTION);
         OptionMapping durationOpt = event.getOption(DURATION_OPTION);
         if (userOpt == null || durationOpt == null) {
-            event.replyEmbeds(Embeds.error("Usage: `/tempmute <user> <duration>` — duration like `30s`, `15m`, `2h`, `7d`."))
-                    .setEphemeral(true).queue();
+            event.replyEmbeds(Embeds.error("Usage: `/tempmute <user> <duration>` — duration like `30s`, `15m`, `2h`, `7d`.")).setEphemeral(true).queue();
             return;
         }
         User target = userOpt.getAsUser();
         if (target.getIdLong() == event.getJDA().getSelfUser().getIdLong()) {
-            event.replyEmbeds(Embeds.error("I can't time myself out."))
-                    .setEphemeral(true).queue();
+            event.replyEmbeds(Embeds.error("I can't time myself out.")).setEphemeral(true).queue();
             return;
         }
         Duration duration;
         try {
             duration = DurationParser.parseOrThrow(durationOpt.getAsString());
         } catch (DurationParser.InvalidDurationException e) {
-            event.replyEmbeds(Embeds.error(e.getMessage()))
-                    .setEphemeral(true).queue();
+            event.replyEmbeds(Embeds.error(e.getMessage())).setEphemeral(true).queue();
             return;
         }
         if (duration.compareTo(MAX_TIMEOUT) > 0) {
-            event.replyEmbeds(Embeds.error("Discord caps timeouts at 28 days. Use `28d` or less."))
-                    .setEphemeral(true).queue();
+            event.replyEmbeds(Embeds.error("Discord caps timeouts at 28 days. Use `28d` or less.")).setEphemeral(true).queue();
             return;
         }
 

@@ -16,7 +16,9 @@ import net.dv8tion.jda.api.requests.GatewayIntent;
 import net.dv8tion.jda.api.utils.MemberCachePolicy;
 import net.dv8tion.jda.api.utils.cache.CacheFlag;
 import renzuy.audio.MusicService;
+import renzuy.commands.AfkCommand;
 import renzuy.commands.CommandRegistrar;
+import renzuy.commands.HateWarnCommand;
 import renzuy.commands.HelpCommand;
 import renzuy.commands.InfoCommand;
 import renzuy.commands.LogCommand;
@@ -32,7 +34,9 @@ import renzuy.commands.TempMuteCommand;
 import renzuy.commands.moderation.UnbanScheduler;
 import renzuy.commands.text.TextCommandRouter;
 import renzuy.config.PrefixStore;
-import renzuy.listeners.MessageListener;
+import renzuy.moderation.AutoModerator;
+import renzuy.moderation.HateWarnConfig;
+import renzuy.moderation.RaidGuard;
 
 public final class Bot {
 
@@ -47,6 +51,7 @@ public final class Bot {
         MusicService music = new MusicService();
         PrefixStore prefixes = PrefixStore.defaultLocation();
         UnbanScheduler unbanScheduler = new UnbanScheduler();
+        HateWarnConfig hateWarnConfig = HateWarnConfig.defaultLocation();
 
         HelpCommand    helpCommand    = new HelpCommand(prefixes);
         PlayCommand    playCommand    = new PlayCommand(music);
@@ -60,6 +65,10 @@ public final class Bot {
         TempMuteCommand tempMuteCommand = new TempMuteCommand();
         TempBanCommand  tempBanCommand  = new TempBanCommand(unbanScheduler);
         LogCommand      logCommand      = new LogCommand();
+        AfkCommand      afkCommand      = new AfkCommand();
+        HateWarnCommand hateWarnCommand = new HateWarnCommand(hateWarnConfig);
+        AutoModerator   autoModerator   = new AutoModerator(hateWarnConfig, unbanScheduler);
+        RaidGuard       raidGuard       = new RaidGuard();
 
         SlashCommandData[] commands = {
                 Commands.slash(HelpCommand.NAME, "Show the list of available commands"),
@@ -78,8 +87,11 @@ public final class Bot {
                                 "The user to look up — defaults to you", false),
                 Commands.slash(PrefixCommand.NAME, "Admin: set the text-command prefix (single special character)")
                         .addOption(OptionType.STRING, PrefixCommand.OPTION,
-                                "A single special character, e.g. ! @ # $ % ^ &", true)
+                                "A single special character, e.g. ! @ # $ % ^ & §", true)
                         .setDefaultPermissions(DefaultMemberPermissions.enabledFor(Permission.MANAGE_SERVER)),
+                Commands.slash(AfkCommand.NAME, "Mark yourself AFK — reason may include an image/GIF URL")
+                        .addOption(OptionType.STRING, AfkCommand.REASON_OPTION,
+                                "Reason (optional). Paste an image/GIF URL to display it.", false),
 
                 // ----- moderation -----
                 Commands.slash(PurgeCommand.NAME, "Bulk-delete up to 100 recent messages from this channel")
@@ -98,12 +110,20 @@ public final class Bot {
                         .addOption(OptionType.STRING, TempBanCommand.REASON_OPTION,   "Reason (audit log)", false)
                         .setDefaultPermissions(DefaultMemberPermissions.enabledFor(Permission.BAN_MEMBERS)),
                 Commands.slash(LogCommand.NAME, "Bind this channel as the server-event log sink")
-                        .setDefaultPermissions(DefaultMemberPermissions.enabledFor(Permission.VIEW_AUDIT_LOGS))
+                        .setDefaultPermissions(DefaultMemberPermissions.enabledFor(Permission.VIEW_AUDIT_LOGS)),
+                Commands.slash(HateWarnCommand.NAME, "Configure auto-punishment after N hate-speech warnings")
+                        .addOptions(new OptionData(OptionType.INTEGER, HateWarnCommand.COUNT_OPTION,
+                                "Warnings before punishment (1–20)", true)
+                                .setMinValue(1).setMaxValue(20))
+                        .addOptions(new OptionData(OptionType.STRING, HateWarnCommand.PUNISHMENT_OPTION,
+                                "Punishment — e.g. `mute 30m` or `ban 7d`", true)
+                                .setAutoComplete(true))
+                        .setDefaultPermissions(DefaultMemberPermissions.enabledFor(Permission.MODERATE_MEMBERS))
         };
 
         TextCommandRouter router = new TextCommandRouter(prefixes,
                 helpCommand, playCommand, stopCommand, skipCommand,
-                queueCommand, removeCommand, infoCommand, purgeCommand);
+                queueCommand, removeCommand, infoCommand, purgeCommand, afkCommand);
 
         JDA jda = JDABuilder.createLight(token,
                         GatewayIntent.GUILD_MESSAGES,
@@ -121,8 +141,8 @@ public final class Bot {
                         helpCommand, playCommand, stopCommand, skipCommand,
                         queueCommand, removeCommand, infoCommand, prefixCommand,
                         purgeCommand, tempMuteCommand, tempBanCommand, logCommand,
+                        afkCommand, hateWarnCommand, autoModerator, raidGuard,
                         router,
-                        new MessageListener(),
                         new CommandRegistrar(commands))
                 .build()
                 .awaitReady();

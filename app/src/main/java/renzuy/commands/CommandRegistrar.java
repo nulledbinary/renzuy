@@ -19,8 +19,8 @@ public final class CommandRegistrar extends ListenerAdapter {
     @Override
     public void onReady(@NotNull ReadyEvent event) {
         event.getJDA().updateCommands().queue(
-                result -> System.out.println("Cleared global commands (now " + result.size() + ")"),
-                error -> System.err.println("Failed to clear global commands: " + error.getMessage())
+            result -> System.out.println("Cleared global commands (now " + result.size() + ")"),
+            error -> System.err.println("Failed to clear global commands: " + error.getMessage())
         );
     }
 
@@ -36,12 +36,10 @@ public final class CommandRegistrar extends ListenerAdapter {
 
     private void register(Guild guild) {
         guild.updateCommands()
-                .addCommands(commands)
-                .queue(
-                        result -> System.out.println(
-                                "Registered " + result.size() + " commands in " + guild.getName() + " (" + guild.getId() + ")"),
-                        error -> System.err.println(
-                                "Failed to register commands in " + guild.getName() + " (" + guild.getId() + "): " + error.getMessage())
-                );
+            .addCommands(commands)
+            .queue(
+                result -> System.out.println("Registered " + result.size() + " commands in " + guild.getName() + " (" + guild.getId() + ")"),
+                error -> System.err.println("Failed to register commands in " + guild.getName() + " (" + guild.getId() + "): " + error.getMessage())
+        );
     }
 }

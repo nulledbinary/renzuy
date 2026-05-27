@@ -70,20 +70,18 @@ public final class InfoCommand extends ListenerAdapter implements TextCommand {
 
     private static void resolveMemberAndReplySlash(
             SlashCommandInteractionEvent event, Guild guild, User user, long startMillis) {
-        // Retrieve user from REST too so banner/flags are populated (the gateway
-        // version is partial). retrieveUser → retrieveMember; latency footer
-        // captures the whole round-trip.
+        // Retrieve user (REST) and profile (banner/accent color) in sequence,
+        // then retrieve the Member so we can show role/voice/perm data too.
         user.getJDA().retrieveUserById(user.getIdLong()).queue(
-                fresh -> guild.retrieveMember(fresh).queue(
-                        member -> event.replyEmbeds(buildEmbed(fresh, member, guild, System.currentTimeMillis() - startMillis))
-                                .setEphemeral(true).queue(),
-                        err -> event.replyEmbeds(buildEmbed(fresh, null, guild, System.currentTimeMillis() - startMillis))
-                                .setEphemeral(true).queue()),
-                err -> event.replyEmbeds(buildEmbed(user, null, guild, System.currentTimeMillis() - startMillis))
-                        .setEphemeral(true).queue());
+            fresh -> fresh.retrieveProfile().queue(
+                profile -> guild.retrieveMember(fresh).queue(
+                    member -> event.replyEmbeds(buildEmbed(fresh, member, guild, profile, System.currentTimeMillis() - startMillis)).setEphemeral(true).queue(),
+                    err    -> event.replyEmbeds(buildEmbed(fresh, null, guild, profile, System.currentTimeMillis() - startMillis)).setEphemeral(true).queue()),
+                err -> guild.retrieveMember(fresh).queue(
+                    member -> event.replyEmbeds(buildEmbed(fresh, member, guild, null, System.currentTimeMillis() - startMillis)).setEphemeral(true).queue(),
+                    e2     -> event.replyEmbeds(buildEmbed(fresh, null, guild, null, System.currentTimeMillis() - startMillis)).setEphemeral(true).queue())),
+            err -> event.replyEmbeds(buildEmbed(user, null, guild, null, System.currentTimeMillis() - startMillis)).setEphemeral(true).queue());
     }
-
-    // ---------------- Text entry ----------------
 
     @Override
     public String name() {
@@ -97,19 +95,25 @@ public final class InfoCommand extends ListenerAdapter implements TextCommand {
         if (args.isEmpty()) {
             User self = event.getAuthor();
             self.getJDA().retrieveUserById(self.getIdLong()).queue(
-                    fresh -> guild.retrieveMember(fresh).queue(
-                            m -> reply(event, fresh, m, guild, System.currentTimeMillis() - start),
-                            err -> reply(event, fresh, null, guild, System.currentTimeMillis() - start)),
-                    err -> reply(event, self, null, guild, System.currentTimeMillis() - start));
+                fresh -> fresh.retrieveProfile().queue(
+                    profile -> guild.retrieveMember(fresh).queue(
+                        m   -> reply(event, fresh, m, guild, profile, System.currentTimeMillis() - start),
+                        err -> reply(event, fresh, null, guild, profile, System.currentTimeMillis() - start)),
+                    err -> guild.retrieveMember(fresh).queue(
+                        m   -> reply(event, fresh, m, guild, null, System.currentTimeMillis() - start),
+                        e2  -> reply(event, fresh, null, guild, null, System.currentTimeMillis() - start))),
+                err -> reply(event, self, null, guild, null, System.currentTimeMillis() - start));
             return;
         }
         resolveUser(guild, args).queue(
-                user -> guild.retrieveMember(user).queue(
-                        m -> reply(event, user, m, guild, System.currentTimeMillis() - start),
-                        err -> reply(event, user, null, guild, System.currentTimeMillis() - start)),
-                err -> event.getChannel().sendMessageEmbeds(
-                        Embeds.warn("Could not find that user. Pass a user ID, @mention, or `name#1234` tag."))
-                        .queue());
+                user -> user.retrieveProfile().queue(
+                    profile -> guild.retrieveMember(user).queue(
+                        m   -> reply(event, user, m, guild, profile, System.currentTimeMillis() - start),
+                        err -> reply(event, user, null, guild, profile, System.currentTimeMillis() - start)),
+                    err -> guild.retrieveMember(user).queue(
+                        m   -> reply(event, user, m, guild, null, System.currentTimeMillis() - start),
+                        e2  -> reply(event, user, null, guild, null, System.currentTimeMillis() - start))),
+                err -> event.getChannel().sendMessageEmbeds(Embeds.warn("Could not find that user. Pass a user ID, @mention, or `name#1234` tag.")).queue());
     }
 
     private static net.dv8tion.jda.api.requests.RestAction<User> resolveUser(Guild guild, String raw) {
@@ -136,23 +140,42 @@ public final class InfoCommand extends ListenerAdapter implements TextCommand {
         return guild.getJDA().retrieveUserById(token);
     }
 
-    private static void reply(MessageReceivedEvent event, User user, Member member, Guild guild, long latencyMillis) {
-        event.getChannel().sendMessageEmbeds(buildEmbed(user, member, guild, latencyMillis)).queue();
+    private static void reply(MessageReceivedEvent event, User user, Member member, Guild guild,
+                              User.Profile profile, long latencyMillis) {
+        event.getChannel().sendMessageEmbeds(buildEmbed(user, member, guild, profile, latencyMillis)).queue();
     }
 
     // ---------------- Embed ----------------
 
-    private static MessageEmbed buildEmbed(User user, Member member, Guild guild, long latencyMillis) {
+    private static MessageEmbed buildEmbed(User user, Member member, Guild guild,
+                                           User.Profile profile, long latencyMillis) {
         OffsetDateTime created = user.getTimeCreated().withOffsetSameInstant(ZoneOffset.UTC);
         long accountAgeDays = ChronoUnit.DAYS.between(created.toLocalDate(), OffsetDateTime.now(ZoneOffset.UTC).toLocalDate());
 
+        java.awt.Color embedColor;
+        if (profile != null && profile.getAccentColor() != null) {
+            embedColor = profile.getAccentColor();
+        } else if (member != null && member.getColorRaw() != Role.DEFAULT_COLOR_RAW) {
+            embedColor = new java.awt.Color(member.getColorRaw());
+        } else {
+            embedColor = Embeds.INFO;
+        }
+
         EmbedBuilder b = new EmbedBuilder()
-                .setColor(member != null && member.getColorRaw() != Role.DEFAULT_COLOR_RAW
-                        ? new java.awt.Color(member.getColorRaw())
-                        : Embeds.INFO)
+                .setColor(embedColor)
                 .setAuthor(user.getName() + (user.isBot() ? " (bot)" : ""), null, user.getEffectiveAvatarUrl())
                 .setThumbnail(user.getEffectiveAvatarUrl())
                 .addField("User", user.getAsMention() + "\n`" + user.getId() + "`", true);
+
+        String globalName = user.getGlobalName();
+        if (globalName != null && !globalName.isBlank() && !globalName.equals(user.getName())) {
+            b.addField("Global name", escape(globalName), true);
+        }
+        b.addField("Username", "`" + user.getName() + "`", true);
+        String discriminator = user.getDiscriminator();
+        if (discriminator != null && !"0000".equals(discriminator) && !"0".equals(discriminator)) {
+            b.addField("Discriminator", "`#" + discriminator + "`", true);
+        }
 
         if (member != null) {
             b.addField("Display name", escape(member.getEffectiveName()), true);
@@ -160,6 +183,21 @@ public final class InfoCommand extends ListenerAdapter implements TextCommand {
         } else {
             b.addField("Display name", escape(user.getName()), true);
             b.addField("Status", "not in server", true);
+        }
+
+        if (profile != null) {
+            if (profile.getBannerUrl() != null) {
+                b.setImage(profile.getBannerUrl() + "?size=600");
+            }
+            if (profile.getAccentColor() != null) {
+                String hex = String.format("#%06X", 0xFFFFFF & profile.getAccentColor().getRGB());
+                b.addField("Accent color", "`" + hex + "`", true);
+            }
+        }
+
+        long mutuals = user.getMutualGuilds().size();
+        if (mutuals > 0) {
+            b.addField("Mutual servers (bot-visible)", String.valueOf(mutuals), true);
         }
 
         b.addField("Account created",

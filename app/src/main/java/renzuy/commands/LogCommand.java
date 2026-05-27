@@ -3,6 +3,10 @@ package renzuy.commands;
 import java.awt.Color;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import net.dv8tion.jda.api.EmbedBuilder;
@@ -10,7 +14,10 @@ import net.dv8tion.jda.api.audit.ActionType;
 import net.dv8tion.jda.api.audit.AuditLogEntry;
 import net.dv8tion.jda.api.entities.Guild;
 import net.dv8tion.jda.api.entities.Member;
+import net.dv8tion.jda.api.entities.Message;
+import net.dv8tion.jda.api.entities.Message.Attachment;
 import net.dv8tion.jda.api.entities.MessageEmbed;
+import net.dv8tion.jda.api.entities.User;
 import net.dv8tion.jda.api.entities.channel.middleman.GuildMessageChannel;
 import net.dv8tion.jda.api.events.guild.GuildBanEvent;
 import net.dv8tion.jda.api.events.guild.GuildUnbanEvent;
@@ -30,15 +37,13 @@ import renzuy.ui.Embeds;
 /**
  * Audit-style server logger.
  *
- * <p>Two responsibilities, on purpose, in one class to keep the channel-binding
- * state local: (1) the {@code /log} slash command, which binds the invoking
- * channel as the log sink for that guild; (2) a JDA listener that watches
- * everything interesting and posts compact embeds to whichever channel is
- * currently bound.
+ * <p>Embeds every chat event with the full content snapshot: deleted messages
+ * surface the original text + any attachment URLs (images, GIFs, files); edits
+ * show before/after; member/voice/ban events render as rich embeds.
  *
- * <p>State is in-memory only — restart wipes bindings. Persistence here would
- * require schema, migrations, and a deploy story; the operator typing
- * {@code /log} on restart is cheaper than all of that.
+ * <p>To support deletion logging the bot keeps a short-lived in-memory cache of
+ * every message it sees (bounded LRU) — Discord's delete event does not carry
+ * the original content, so we cache on receipt and look up on delete.
  */
 public final class LogCommand extends ListenerAdapter {
 
@@ -51,8 +56,25 @@ public final class LogCommand extends ListenerAdapter {
     private static final Color C_MUTE   = new Color(0xFEE75C);
     private static final Color C_VOICE  = new Color(0x9B59B6);
 
+    private static final int MESSAGE_CACHE_LIMIT = 5_000;
+
+    private record CachedMessage(
+            long authorId, String authorTag, String authorAvatar,
+            long channelId, String content,
+            List<String> attachmentUrls, List<String> stickerUrls,
+            OffsetDateTime createdAt) {}
+
     /** Guild ID → message-channel ID. Concurrent because events come in on JDA's pool. */
     private final Map<Long, Long> logChannelByGuild = new ConcurrentHashMap<>();
+
+    /** Bounded LRU of recent messages so we can render deletions with content. */
+    private final Map<Long, CachedMessage> messageCache = Collections.synchronizedMap(
+            new LinkedHashMap<>(1024, 0.75f, true) {
+                @Override
+                protected boolean removeEldestEntry(Map.Entry<Long, CachedMessage> eldest) {
+                    return size() > MESSAGE_CACHE_LIMIT;
+                }
+            });
 
     // ---------------- /log slash entry ----------------
 
@@ -94,12 +116,28 @@ public final class LogCommand extends ListenerAdapter {
         if (channelId == null) return;
         GuildMessageChannel channel = guild.getChannelById(GuildMessageChannel.class, channelId);
         if (channel == null) {
-            // Channel was deleted; drop the binding silently rather than spamming retries.
             logChannelByGuild.remove(guild.getIdLong(), channelId);
             return;
         }
         if (!guild.getSelfMember().hasAccess(channel)) return;
         channel.sendMessageEmbeds(embed).queue(v -> {}, err -> {});
+    }
+
+    private void postMany(Guild guild, List<MessageEmbed> embeds) {
+        if (embeds.isEmpty()) return;
+        Long channelId = logChannelByGuild.get(guild.getIdLong());
+        if (channelId == null) return;
+        GuildMessageChannel channel = guild.getChannelById(GuildMessageChannel.class, channelId);
+        if (channel == null) {
+            logChannelByGuild.remove(guild.getIdLong(), channelId);
+            return;
+        }
+        if (!guild.getSelfMember().hasAccess(channel)) return;
+        // Discord allows up to 10 embeds per message.
+        for (int i = 0; i < embeds.size(); i += 10) {
+            channel.sendMessageEmbeds(embeds.subList(i, Math.min(i + 10, embeds.size())))
+                    .queue(v -> {}, err -> {});
+        }
     }
 
     private static MessageEmbed event(Color color, String title, String body) {
@@ -111,56 +149,183 @@ public final class LogCommand extends ListenerAdapter {
                 .build();
     }
 
-    // ---------------- chat events ----------------
+    // ---------------- message cache ----------------
 
     @Override
     public void onMessageReceived(@NotNull MessageReceivedEvent event) {
         if (!event.isFromGuild() || event.getAuthor().isBot()) return;
-        // Skip the noisy default — only log chat at debug-style level: count by
-        // surfacing edits and deletes, not every benign message. (Keeps the
-        // channel readable; an admin who wants every line can read history.)
+        cache(event.getMessage());
     }
+
+    private void cache(Message message) {
+        List<String> attachUrls = new ArrayList<>();
+        for (Attachment a : message.getAttachments()) {
+            attachUrls.add(a.getUrl());
+        }
+        List<String> stickerUrls = new ArrayList<>();
+        message.getStickers().forEach(s -> stickerUrls.add(s.getIconUrl()));
+
+        User author = message.getAuthor();
+        messageCache.put(message.getIdLong(), new CachedMessage(
+                author.getIdLong(),
+                author.getAsTag(),
+                author.getEffectiveAvatarUrl(),
+                message.getChannel().getIdLong(),
+                message.getContentRaw(),
+                attachUrls,
+                stickerUrls,
+                message.getTimeCreated()));
+    }
+
+    // ---------------- chat events ----------------
 
     @Override
     public void onMessageUpdate(@NotNull MessageUpdateEvent event) {
         if (!event.isFromGuild() || event.getAuthor().isBot()) return;
-        String content = event.getMessage().getContentDisplay();
-        if (content.isBlank()) return;
-        String body = "**Message edited** by " + event.getAuthor().getAsMention()
-                + " in <#" + event.getChannel().getId() + ">\n"
-                + "```\n" + truncate(content, 800) + "\n```";
-        post(event.getGuild(), event(C_UPDATE, "Message edited", body));
+        Message after = event.getMessage();
+        CachedMessage before = messageCache.get(after.getIdLong());
+
+        EmbedBuilder b = new EmbedBuilder()
+                .setColor(C_UPDATE)
+                .setAuthor("Message edited", null, event.getAuthor().getEffectiveAvatarUrl())
+                .setDescription(event.getAuthor().getAsMention() + " edited a message in <#"
+                        + event.getChannel().getId() + ">")
+                .setFooter("Author: " + event.getAuthor().getAsTag()
+                        + " · " + STAMP.format(OffsetDateTime.now()));
+
+        if (before != null && !before.content().isBlank()) {
+            b.addField("Before", "```\n" + truncate(before.content(), 900) + "\n```", false);
+        }
+        String now = after.getContentRaw();
+        if (!now.isBlank()) {
+            b.addField("After", "```\n" + truncate(now, 900) + "\n```", false);
+        }
+        b.addField("Jump", "[Open in channel](" + after.getJumpUrl() + ")", false);
+
+        post(event.getGuild(), b.build());
+        // Refresh cache so subsequent edits diff against the latest body.
+        cache(after);
     }
 
     @Override
     public void onMessageDelete(@NotNull MessageDeleteEvent event) {
         if (!event.isFromGuild()) return;
-        String body = "**Message deleted** in <#" + event.getChannel().getId() + ">\n"
-                + "Message ID: `" + event.getMessageId() + "`";
-        post(event.getGuild(), event(C_DELETE, "Message deleted", body));
+        CachedMessage cached = messageCache.remove(event.getMessageIdLong());
+
+        EmbedBuilder b = new EmbedBuilder()
+                .setColor(C_DELETE)
+                .setAuthor("Message deleted",
+                        null,
+                        cached != null ? cached.authorAvatar() : null)
+                .setFooter("Message ID: " + event.getMessageId()
+                        + " · " + STAMP.format(OffsetDateTime.now()));
+
+        StringBuilder desc = new StringBuilder();
+        desc.append("**Channel:** <#").append(event.getChannel().getId()).append('>');
+        if (cached != null) {
+            desc.append("\n**Author:** <@").append(cached.authorId()).append("> (`")
+                    .append(cached.authorTag()).append("`)");
+            desc.append("\n**Sent:** <t:").append(cached.createdAt().toEpochSecond()).append(":f>");
+        } else {
+            desc.append("\n_(content not cached — message predates the bot's current uptime)_");
+        }
+        b.setDescription(desc.toString());
+
+        List<MessageEmbed> extra = new ArrayList<>();
+
+        if (cached != null) {
+            if (!cached.content().isBlank()) {
+                b.addField("Content", "```\n" + truncate(cached.content(), 1000) + "\n```", false);
+                String firstLink = firstUrl(cached.content());
+                if (firstLink != null) {
+                    b.addField("First link", firstLink, false);
+                }
+            }
+            if (!cached.attachmentUrls().isEmpty()) {
+                StringBuilder a = new StringBuilder();
+                String firstImage = null;
+                for (String url : cached.attachmentUrls()) {
+                    a.append(url).append('\n');
+                    if (firstImage == null && looksLikeImage(url)) firstImage = url;
+                }
+                b.addField("Attachments (" + cached.attachmentUrls().size() + ")",
+                        truncate(a.toString(), 1000), false);
+                if (firstImage != null) {
+                    b.setImage(firstImage);
+                }
+                // One small extra embed per additional image so they're all visible.
+                boolean skipFirst = firstImage != null;
+                for (String url : cached.attachmentUrls()) {
+                    if (skipFirst && url.equals(firstImage)) { skipFirst = false; continue; }
+                    if (looksLikeImage(url)) {
+                        extra.add(new EmbedBuilder()
+                                .setColor(C_DELETE)
+                                .setImage(url)
+                                .build());
+                    }
+                }
+            }
+            if (!cached.stickerUrls().isEmpty()) {
+                b.addField("Stickers",
+                        String.join("\n", cached.stickerUrls()), false);
+                if (b.build().getImage() == null) {
+                    b.setImage(cached.stickerUrls().get(0));
+                }
+            }
+        }
+
+        List<MessageEmbed> all = new ArrayList<>();
+        all.add(b.build());
+        all.addAll(extra);
+        postMany(event.getGuild(), all);
     }
 
     // ---------------- member events ----------------
 
     @Override
     public void onGuildMemberJoin(@NotNull GuildMemberJoinEvent event) {
-        String body = event.getMember().getAsMention() + " joined the server.";
-        post(event.getGuild(), event(C_CREATE, "Member joined", body));
+        Member m = event.getMember();
+        long ageDays = (System.currentTimeMillis() - m.getUser().getTimeCreated().toInstant().toEpochMilli())
+                / (1000L * 60 * 60 * 24);
+        MessageEmbed embed = new EmbedBuilder()
+                .setColor(C_CREATE)
+                .setAuthor("Member joined", null, m.getUser().getEffectiveAvatarUrl())
+                .setThumbnail(m.getUser().getEffectiveAvatarUrl())
+                .setDescription(m.getAsMention() + " joined the server.")
+                .addField("Tag", "`" + m.getUser().getAsTag() + "`", true)
+                .addField("ID", "`" + m.getId() + "`", true)
+                .addField("Account age", ageDays + " days", true)
+                .setFooter(STAMP.format(OffsetDateTime.now()))
+                .build();
+        post(event.getGuild(), embed);
     }
 
     @Override
     public void onGuildMemberRemove(@NotNull GuildMemberRemoveEvent event) {
-        String body = "**" + event.getUser().getName() + "** (`" + event.getUser().getId()
-                + "`) left or was removed.";
-        post(event.getGuild(), event(C_DELETE, "Member left", body));
+        User u = event.getUser();
+        MessageEmbed embed = new EmbedBuilder()
+                .setColor(C_DELETE)
+                .setAuthor("Member left", null, u.getEffectiveAvatarUrl())
+                .setThumbnail(u.getEffectiveAvatarUrl())
+                .setDescription("**" + u.getAsTag() + "** (`" + u.getId() + "`) left or was removed.")
+                .setFooter(STAMP.format(OffsetDateTime.now()))
+                .build();
+        post(event.getGuild(), embed);
     }
 
     @Override
     public void onGuildMemberUpdateNickname(@NotNull GuildMemberUpdateNicknameEvent event) {
         String before = event.getOldNickname() == null ? event.getUser().getName() : event.getOldNickname();
         String after  = event.getNewNickname() == null ? event.getUser().getName() : event.getNewNickname();
-        String body = event.getUser().getAsMention() + " nickname: `" + before + "` → `" + after + "`";
-        post(event.getGuild(), event(C_UPDATE, "Nickname changed", body));
+        MessageEmbed embed = new EmbedBuilder()
+                .setColor(C_UPDATE)
+                .setAuthor("Nickname changed", null, event.getUser().getEffectiveAvatarUrl())
+                .setDescription(event.getUser().getAsMention() + " changed nickname.")
+                .addField("Before", "`" + before + "`", true)
+                .addField("After", "`" + after + "`", true)
+                .setFooter(STAMP.format(OffsetDateTime.now()))
+                .build();
+        post(event.getGuild(), embed);
     }
 
     @Override
@@ -177,7 +342,6 @@ public final class LogCommand extends ListenerAdapter {
     @Override
     public void onGuildBan(@NotNull GuildBanEvent event) {
         Guild guild = event.getGuild();
-        event.getUser().getJDA();
         guild.retrieveAuditLogs().type(ActionType.BAN).limit(1).queue(entries -> {
             String moderator = entries.stream().findFirst()
                     .map(AuditLogEntry::getUser)
@@ -186,19 +350,19 @@ public final class LogCommand extends ListenerAdapter {
             String reason = entries.stream().findFirst()
                     .map(AuditLogEntry::getReason)
                     .orElse(null);
-            String body = "**" + event.getUser().getName() + "** (`" + event.getUser().getId()
+            String body = "**" + event.getUser().getAsTag() + "** (`" + event.getUser().getId()
                     + "`) was banned.\nBy: " + moderator
                     + (reason == null ? "" : "\nReason: " + reason);
             post(guild, event(C_DELETE, "User banned", body));
         }, err -> {
-            String body = "**" + event.getUser().getName() + "** (`" + event.getUser().getId() + "`) was banned.";
+            String body = "**" + event.getUser().getAsTag() + "** (`" + event.getUser().getId() + "`) was banned.";
             post(guild, event(C_DELETE, "User banned", body));
         });
     }
 
     @Override
     public void onGuildUnban(@NotNull GuildUnbanEvent event) {
-        String body = "**" + event.getUser().getName() + "** (`" + event.getUser().getId() + "`) was unbanned.";
+        String body = "**" + event.getUser().getAsTag() + "** (`" + event.getUser().getId() + "`) was unbanned.";
         post(event.getGuild(), event(C_CREATE, "User unbanned", body));
     }
 
@@ -222,17 +386,31 @@ public final class LogCommand extends ListenerAdapter {
         post(event.getGuild(), event(C_VOICE, "Voice update", body));
     }
 
+    // ---------------- utilities ----------------
+
     private static String truncate(String s, int max) {
         if (s.length() <= max) return s;
         return s.substring(0, max - 1) + "…";
     }
 
-    // ---------------- text-command path: bind this channel ----------------
+    private static boolean looksLikeImage(String url) {
+        String lower = url.toLowerCase();
+        int q = lower.indexOf('?');
+        if (q >= 0) lower = lower.substring(0, q);
+        return lower.endsWith(".png") || lower.endsWith(".jpg") || lower.endsWith(".jpeg")
+                || lower.endsWith(".gif") || lower.endsWith(".webp") || lower.endsWith(".apng");
+    }
 
-    /**
-     * Optional text invocation: {@code <prefix>log} also binds the invoking
-     * channel as the log sink. Same permission gate as the slash version.
-     */
+    private static String firstUrl(String text) {
+        if (text == null) return null;
+        int idx = text.indexOf("http");
+        if (idx < 0) return null;
+        int end = idx;
+        while (end < text.length() && !Character.isWhitespace(text.charAt(end))) end++;
+        String candidate = text.substring(idx, end);
+        return (candidate.startsWith("http://") || candidate.startsWith("https://")) ? candidate : null;
+    }
+
     public void handleText(MessageReceivedEvent event) {
         Member member = event.getMember();
         if (!Capability.VIEW_LOGS.grantedTo(member)) {
