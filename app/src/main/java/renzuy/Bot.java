@@ -94,7 +94,8 @@ public final class Bot {
                 Commands.slash(AfkCommand.NAME, "Mark yourself AFK — reason may include an image/GIF URL")
                         .addOption(OptionType.STRING, AfkCommand.REASON_OPTION,
                                 "Reason (optional). Paste an image/GIF URL to display it.", false),
-                Commands.slash(TambayCommand.NAME, "Join the voice channel to idle and chill"),
+                Commands.slash(TambayCommand.NAME, "Join the voice channel to idle and chill")
+                        .setDefaultPermissions(DefaultMemberPermissions.enabledFor(Permission.MANAGE_SERVER)),
 
                 // ----- moderation -----
                 Commands.slash(PurgeCommand.NAME, "Bulk-delete up to 100 recent messages from this channel")
