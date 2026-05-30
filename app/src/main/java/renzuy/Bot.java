@@ -29,6 +29,7 @@ import renzuy.commands.QueueCommand;
 import renzuy.commands.RemoveCommand;
 import renzuy.commands.SkipCommand;
 import renzuy.commands.StopCommand;
+import renzuy.commands.TambayCommand;
 import renzuy.commands.TempBanCommand;
 import renzuy.commands.TempMuteCommand;
 import renzuy.commands.moderation.UnbanScheduler;
@@ -69,6 +70,7 @@ public final class Bot {
         HateWarnCommand hateWarnCommand = new HateWarnCommand(hateWarnConfig);
         AutoModerator   autoModerator   = new AutoModerator(hateWarnConfig, unbanScheduler);
         RaidGuard       raidGuard       = new RaidGuard();
+        TambayCommand   tambayCommand   = new TambayCommand();
 
         SlashCommandData[] commands = {
                 Commands.slash(HelpCommand.NAME, "Show the list of available commands"),
@@ -92,6 +94,7 @@ public final class Bot {
                 Commands.slash(AfkCommand.NAME, "Mark yourself AFK — reason may include an image/GIF URL")
                         .addOption(OptionType.STRING, AfkCommand.REASON_OPTION,
                                 "Reason (optional). Paste an image/GIF URL to display it.", false),
+                Commands.slash(TambayCommand.NAME, "Join the voice channel to idle and chill"),
 
                 // ----- moderation -----
                 Commands.slash(PurgeCommand.NAME, "Bulk-delete up to 100 recent messages from this channel")
@@ -142,7 +145,7 @@ public final class Bot {
                         queueCommand, removeCommand, infoCommand, prefixCommand,
                         purgeCommand, tempMuteCommand, tempBanCommand, logCommand,
                         afkCommand, hateWarnCommand, autoModerator, raidGuard,
-                        router,
+                        tambayCommand, router,
                         new CommandRegistrar(commands))
                 .build()
                 .awaitReady();

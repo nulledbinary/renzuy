@@ -32,9 +32,15 @@ FROM eclipse-temurin:25-jre-noble
 # so a system-wide install is the intended placement.
 RUN set -eux \
  && apt-get update \
- && apt-get install -y --no-install-recommends ffmpeg python3 python3-pip ca-certificates \
+ && apt-get install -y --no-install-recommends ffmpeg python3 python3-pip ca-certificates curl unzip iproute2 \
  && python3 -m pip install --no-cache-dir --break-system-packages "yt-dlp[default,curl-cffi]" \
  && python3 -m pip install --no-cache-dir --break-system-packages bgutil-ytdlp-pot-provider \
+ && curl -s "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" \
+ && unzip -q awscliv2.zip \
+ && ./aws/install \
+ && rm -rf aws awscliv2.zip \
+ && apt-get remove -y unzip \
+ && apt-get autoremove -y \
  && yt-dlp --version \
  && yt-dlp --list-impersonate-targets | grep -qi chrome \
  && rm -rf /var/lib/apt/lists/* /root/.cache

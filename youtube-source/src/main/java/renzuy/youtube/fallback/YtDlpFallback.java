@@ -15,6 +15,7 @@ import org.slf4j.LoggerFactory;
 import renzuy.youtube.AudioReference;
 import renzuy.youtube.BotChallengeException;
 import renzuy.youtube.YoutubeSourceException;
+import renzuy.youtube.Ipv6Block;
 
 /**
  * The yt-dlp fallback path.
@@ -39,10 +40,11 @@ import renzuy.youtube.YoutubeSourceException;
  *   <li><b>Cookies</b> — if {@code YT_DLP_COOKIES} points at a Netscape
  *       cookies file, {@code mweb} leads. Otherwise {@code tv_embedded}
  *       leads (most resilient anon client).</li>
- *   <li><b>PoToken / proxy</b> — operator-set {@code YT_DLP_PROXY} routes
+ *   <li><b>PoToken / proxy / IPv6</b> — operator-set {@code YT_DLP_PROXY} routes
  *       through a residential IP; {@code YT_DLP_PO_TOKEN} pins a static
  *       PoToken; {@code YT_DLP_POT_PROVIDER_URL} points the bgutil yt-dlp
- *       plugin at an ECS-sidecar token provider for per-call minting.</li>
+ *       plugin at an ECS-sidecar token provider for per-call minting. IPv6
+ *       rotation binds each call to a random address from an IPv6 block.</li>
  * </ol>
  */
 public final class YtDlpFallback {
@@ -95,6 +97,7 @@ public final class YtDlpFallback {
     private final String proxy;
     private final String poToken;
     private final String potProviderUrl;
+    private final Ipv6Block ipv6Block;
     /**
      * Impersonate targets that this yt-dlp/curl_cffi actually has built — never
      * trust a hard-coded list, since target availability moves with each
@@ -111,25 +114,32 @@ public final class YtDlpFallback {
     private final AtomicLong botChallengeUntil = new AtomicLong(0L);
 
     public YtDlpFallback(String ytDlpPath) {
-        this(ytDlpPath, "", "", "", "");
+        this(ytDlpPath, "", "", "", "", "");
     }
 
     public YtDlpFallback(String ytDlpPath, String cookiesPath) {
-        this(ytDlpPath, cookiesPath, "", "", "");
+        this(ytDlpPath, cookiesPath, "", "", "", "");
     }
 
     public YtDlpFallback(String ytDlpPath, String cookiesPath, String proxy, String poToken) {
-        this(ytDlpPath, cookiesPath, proxy, poToken, "");
+        this(ytDlpPath, cookiesPath, proxy, poToken, "", "");
     }
 
     public YtDlpFallback(
             String ytDlpPath, String cookiesPath,
             String proxy, String poToken, String potProviderUrl) {
+        this(ytDlpPath, cookiesPath, proxy, poToken, potProviderUrl, "");
+    }
+
+    public YtDlpFallback(
+            String ytDlpPath, String cookiesPath,
+            String proxy, String poToken, String potProviderUrl, String ipv6BlockCidr) {
         this.ytDlpPath  = ytDlpPath;
         this.cookiesPath    = cookiesPath == null ? "" : cookiesPath;
         this.proxy          = proxy == null ? "" : proxy;
         this.poToken        = poToken == null ? "" : poToken;
         this.potProviderUrl = potProviderUrl == null ? "" : potProviderUrl;
+        this.ipv6Block      = ipv6BlockCidr == null || ipv6BlockCidr.isBlank() ? null : new Ipv6Block(ipv6BlockCidr);
         this.impersonatePool = detectImpersonateTargets(ytDlpPath);
         log.info("[yt-dlp] {} impersonate target(s) available: {}",
                 impersonatePool.size(), impersonatePool);
@@ -141,6 +151,9 @@ public final class YtDlpFallback {
         }
         if (!this.potProviderUrl.isBlank()) {
             log.info("[yt-dlp] PoToken provider URL configured: {}", this.potProviderUrl);
+        }
+        if (this.ipv6Block != null) {
+            log.info("[yt-dlp] IPv6 block rotation configured");
         }
     }
 
@@ -411,6 +424,9 @@ public final class YtDlpFallback {
         cmd.add("--impersonate"); cmd.add(attempt.impersonateTarget());
         if (!proxy.isBlank()) {
             cmd.add("--proxy"); cmd.add(proxy);
+        }
+        if (ipv6Block != null) {
+            cmd.add("--source-address"); cmd.add(ipv6Block.generateRandomString());
         }
         appendCookiesArg(cmd);
         return cmd;
