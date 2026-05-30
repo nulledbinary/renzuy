@@ -50,7 +50,8 @@ public final class HelpCommand extends ListenerAdapter implements TextCommand {
             new Entry("tempmute <user> <duration>", "Discord timeout — e.g. 30s, 15m, 2h, 7d", Capability.TIMEOUT_MEMBERS),
             new Entry("tempban <user> <duration>", "Ban with scheduled auto-unban", Capability.BAN_MEMBERS),
             new Entry("log", "Bind this channel as the server event log", Capability.VIEW_LOGS),
-            new Entry("hatewarn <count> <punishment>", "Configure warnings threshold + punishment for hate-speech (slash only)", Capability.TIMEOUT_MEMBERS)
+            new Entry("hatewarn <count> <punishment>", "Configure warnings threshold + punishment for hate-speech (slash only)", Capability.TIMEOUT_MEMBERS),
+            new Entry("tambay", "Join the voice channel to idle and chill (slash only)", Capability.MANAGE_SERVER)
     );
 
     private static final List<Entry> ADMIN = List.of(
