@@ -60,6 +60,16 @@ public record AudioReference(
     }
 
     /**
+     * @return the YouTube video thumbnail URL, or null if not a YouTube video.
+     */
+    public String thumbnailUrl() {
+        if (videoId != null && !videoId.isBlank()) {
+            return "https://img.youtube.com/vi/" + videoId + "/hqdefault.jpg";
+        }
+        return null;
+    }
+
+    /**
      * Builds a lazy placeholder for a playlist entry. The stream URL is empty; the
      * downstream resolver re-resolves by {@code webpageUrl} (or {@code videoId} for
      * YouTube entries) right before playback.

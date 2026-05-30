@@ -117,9 +117,9 @@ public final class HelpCommand extends ListenerAdapter implements TextCommand {
                 .setDescription("Each command can be invoked with `/` (slash) or with the text prefix `"
                         + prefix + "`.\nCommands you don't have permission to run are hidden.");
 
-        appendField(b, "General", GENERAL, member, prefix);
-        appendField(b, "Management", MANAGEMENT, member, prefix);
-        appendField(b, "Administrative", ADMIN, member, prefix);
+        appendField(b, "🌟 General", GENERAL, member, prefix);
+        appendField(b, "🛡️ Management", MANAGEMENT, member, prefix);
+        appendField(b, "⚙️ Administrative", ADMIN, member, prefix);
 
         b.setFooter("Current text prefix: " + prefix);
         return b.build();
@@ -130,9 +130,9 @@ public final class HelpCommand extends ListenerAdapter implements TextCommand {
         if (usable.isEmpty()) return;
         StringBuilder body = new StringBuilder(usable.size() * 64);
         for (Entry e : usable) {
-            body.append("`/").append(e.usage()).append("` · `")
-                    .append(prefix).append(e.usage()).append("`\n— ")
-                    .append(e.description()).append('\n');
+            body.append("`/").append(e.usage()).append("` | `")
+                    .append(prefix).append(e.usage()).append("`\n└ ")
+                    .append(e.description()).append("\n\n");
         }
         b.addField(title, body.toString(), false);
     }

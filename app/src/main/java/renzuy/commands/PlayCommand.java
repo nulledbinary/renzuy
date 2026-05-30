@@ -121,16 +121,15 @@ public final class PlayCommand extends ListenerAdapter implements TextCommand {
             reply.accept(Embeds.error("Could not start playback: " + e.getMessage()));
             return;
         }
-        String firstTitle = result.first().title();
         if (result.isPlaylist()) {
             int firstPosition = startedNow ? 0
                     : Math.max(player.pendingTracks().size() - (result.tracks().size() - 1), 1);
             reply.accept(Embeds.playlistQueued(result.playlistTitle(), result.tracks().size(),
-                    firstTitle, startedNow, firstPosition));
+                    result.first(), startedNow, firstPosition));
         } else if (startedNow) {
-            reply.accept(Embeds.playing(firstTitle));
+            reply.accept(Embeds.playing(result.first()));
         } else {
-            reply.accept(Embeds.queued(firstTitle, player.pendingTracks().size()));
+            reply.accept(Embeds.queued(result.first(), player.pendingTracks().size()));
         }
     }
 }
