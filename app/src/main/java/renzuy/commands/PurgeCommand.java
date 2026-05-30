@@ -31,10 +31,7 @@ public final class PurgeCommand extends ListenerAdapter implements TextCommand {
 
     public static final String NAME = "purge";
     public static final String COUNT_OPTION = "count";
-
-    /** Discord's hard ceiling on a single bulk-delete call. */
     private static final int MAX_PURGE = 100;
-    /** Messages strictly older than this cannot be bulk-deleted by the API. */
     private static final long BULK_DELETE_AGE_DAYS = 14L;
 
     @Override
@@ -74,11 +71,7 @@ public final class PurgeCommand extends ListenerAdapter implements TextCommand {
 
         GuildMessageChannel channel = event.getChannel().asGuildMessageChannel();
         event.deferReply(true).queue();
-        channel.getHistory().retrievePast(count).queue(
-                messages -> bulkDelete(channel, messages, event),
-                error    -> event.getHook().sendMessageEmbeds(
-                        Embeds.error("Could not fetch messages: " + error.getMessage()))
-                        .setEphemeral(true).queue());
+        channel.getHistory().retrievePast(count).queue(messages -> bulkDelete(channel, messages, event), error -> event.getHook().sendMessageEmbeds(Embeds.error("Could not fetch messages: " + error.getMessage())).setEphemeral(true).queue());
     }
 
     @Override
@@ -122,9 +115,7 @@ public final class PurgeCommand extends ListenerAdapter implements TextCommand {
         int count = Math.min(requested + 1, MAX_PURGE);
         GuildMessageChannel channel = event.getChannel().asGuildMessageChannel();
         channel.getHistory().retrievePast(count).queue(
-                messages -> bulkDelete(channel, messages, null),
-                error    -> event.getMessage().reply("Could not fetch messages: " + error.getMessage())
-                        .mentionRepliedUser(false).queue());
+                messages -> bulkDelete(channel, messages, null), error -> event.getMessage().reply("Could not fetch messages: " + error.getMessage()).mentionRepliedUser(false).queue());
     }
 
     /**

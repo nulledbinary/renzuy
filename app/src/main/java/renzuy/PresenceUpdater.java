@@ -66,7 +66,12 @@ public final class PresenceUpdater {
             long total = jda.getGuilds().stream()
                     .mapToLong(g -> g.getMemberCount())
                     .sum();
-            String text = "Inaalipin ng mga " + NUMBER_FORMAT.format(total) + " Kuneho";
+            String text;
+            if (renzuy.commands.TambayCommand.isActive) {
+                text = "I am just chilling on this Voice Channel - All in while monitoring " + NUMBER_FORMAT.format(total) + " people";
+            } else {
+                text = "Inaalipin ng mga " + NUMBER_FORMAT.format(total) + " Kuneho";
+            }
             jda.getPresence().setPresence(OnlineStatus.IDLE, Activity.customStatus(text));
         } catch (Exception e) {
             System.err.println("[Presence] Failed to refresh status: " + e.getMessage());

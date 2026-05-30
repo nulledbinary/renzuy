@@ -49,8 +49,7 @@ public final class RaidGuard extends ListenerAdapter {
         Member member = event.getMember();
         if (member == null) return;
         // Don't fight against moderators or admins — they may be doing housekeeping.
-        if (member.hasPermission(Permission.MODERATE_MEMBERS, Permission.MESSAGE_MANAGE)
-                || member.hasPermission(Permission.ADMINISTRATOR)) return;
+        if (member.hasPermission(Permission.MODERATE_MEMBERS, Permission.MESSAGE_MANAGE) || member.hasPermission(Permission.ADMINISTRATOR)) return;
 
         Message message = event.getMessage();
         long key = compositeKey(event.getGuild().getIdLong(), event.getAuthor().getIdLong());
@@ -58,7 +57,6 @@ public final class RaidGuard extends ListenerAdapter {
         Instant now = Instant.now();
 
         synchronized (queue) {
-            // Drop expired entries.
             Instant cutoff = now.minusSeconds(WINDOW_SECONDS);
             while (!queue.isEmpty() && queue.peekFirst().at().isBefore(cutoff)) {
                 queue.pollFirst();

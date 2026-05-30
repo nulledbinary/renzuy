@@ -29,6 +29,10 @@ import java.time.Duration;
  *                        the AWS-native alternative to a static {@code po_token}
  *                        or a residential proxy. Bypasses YouTube's IP scoring
  *                        without a tracked session.
+ * @param ipv6Block       an IPv6 CIDR block (e.g. "2001:db8::/64") used for IP
+ *                        rotation. When set, each yt-dlp request (and Innertube
+ *                        probe if implemented) gets bound to a random address
+ *                        from this block. Mitigates IP bans on datacenter IPv6.
  * @param verifyStreamUrl probe the chosen CDN URL with a 1-byte ranged GET before
  *                        returning it — costs one short round trip, but guarantees
  *                        the bot never starts ffmpeg against a dead URL
@@ -45,6 +49,7 @@ public record YoutubeSourceOptions(
         String ytDlpProxy,
         String ytDlpPoToken,
         String ytDlpPotProviderUrl,
+        String ipv6Block,
         boolean verifyStreamUrl,
         boolean prewarmOnStart) {
 
@@ -68,6 +73,7 @@ public record YoutubeSourceOptions(
         private String ytDlpProxy = "";
         private String ytDlpPoToken = "";
         private String ytDlpPotProviderUrl = "";
+        private String ipv6Block = "";
         private boolean verifyStreamUrl = true;
         private boolean prewarmOnStart = true;
 
@@ -81,6 +87,7 @@ public record YoutubeSourceOptions(
         public Builder ytDlpProxy(String v) { this.ytDlpProxy = v == null ? "" : v; return this; }
         public Builder ytDlpPoToken(String v) { this.ytDlpPoToken = v == null ? "" : v; return this; }
         public Builder ytDlpPotProviderUrl(String v) { this.ytDlpPotProviderUrl = v == null ? "" : v; return this; }
+        public Builder ipv6Block(String v) { this.ipv6Block = v == null ? "" : v; return this; }
         public Builder verifyStreamUrl(boolean v) { this.verifyStreamUrl = v; return this; }
         public Builder prewarmOnStart(boolean v) { this.prewarmOnStart = v; return this; }
 
@@ -88,7 +95,7 @@ public record YoutubeSourceOptions(
             return new YoutubeSourceOptions(
                     connectTimeout, requestTimeout, cacheTtl, cacheMaxEntries,
                     fallbackEnabled, ytDlpPath, ytDlpCookiesPath, ytDlpProxy, ytDlpPoToken,
-                    ytDlpPotProviderUrl, verifyStreamUrl, prewarmOnStart);
+                    ytDlpPotProviderUrl, ipv6Block, verifyStreamUrl, prewarmOnStart);
         }
     }
 }

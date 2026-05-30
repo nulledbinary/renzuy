@@ -40,12 +40,14 @@ public final class MusicService {
         String proxy          = DotEnv.get("YT_DLP_PROXY");
         String poToken        = DotEnv.get("YT_DLP_PO_TOKEN");
         String potProviderUrl = DotEnv.get("YT_DLP_POT_PROVIDER_URL");
+        String ipv6Block      = DotEnv.get("IPV6_BLOCK");
         this.source = new YoutubeSource(YoutubeSourceOptions.builder()
                 .ytDlpPath(Binaries.YT_DLP)
                 .ytDlpCookiesPath(cookiesPath == null ? "" : cookiesPath)
                 .ytDlpProxy(proxy == null ? "" : proxy)
                 .ytDlpPoToken(poToken == null ? "" : poToken)
                 .ytDlpPotProviderUrl(potProviderUrl == null ? "" : potProviderUrl)
+                .ipv6Block(ipv6Block == null ? "" : ipv6Block)
                 .build());
     }
 

@@ -95,6 +95,10 @@ public final class Embeds {
         return new EmbedBuilder().setColor(INFO).setDescription(message).build();
     }
 
+    public static MessageEmbed success(String message) {
+        return new EmbedBuilder().setColor(SUCCESS).setDescription(message).build();
+    }
+
     public static MessageEmbed warn(String message) {
         return new EmbedBuilder().setColor(WARN).setDescription(message).build();
     }
