@@ -165,24 +165,24 @@ public final class InfoCommand extends ListenerAdapter implements TextCommand {
                 .setColor(embedColor)
                 .setAuthor(user.getName() + (user.isBot() ? " (bot)" : ""), null, user.getEffectiveAvatarUrl())
                 .setThumbnail(user.getEffectiveAvatarUrl())
-                .addField("User", user.getAsMention() + "\n`" + user.getId() + "`", true);
+                .addField("👤 User", user.getAsMention() + "\n`" + user.getId() + "`", true);
 
         String globalName = user.getGlobalName();
         if (globalName != null && !globalName.isBlank() && !globalName.equals(user.getName())) {
-            b.addField("Global name", escape(globalName), true);
+            b.addField("🏷️ Global name", escape(globalName), true);
         }
-        b.addField("Username", "`" + user.getName() + "`", true);
+        b.addField("🆔 Username", "`" + user.getName() + "`", true);
         String discriminator = user.getDiscriminator();
         if (discriminator != null && !"0000".equals(discriminator) && !"0".equals(discriminator)) {
-            b.addField("Discriminator", "`#" + discriminator + "`", true);
+            b.addField("🔢 Discriminator", "`#" + discriminator + "`", true);
         }
 
         if (member != null) {
-            b.addField("Display name", escape(member.getEffectiveName()), true);
-            b.addField("Status", member.getOnlineStatus().getKey(), true);
+            b.addField("📛 Display name", escape(member.getEffectiveName()), true);
+            b.addField("💭 Status", member.getOnlineStatus().getKey(), true);
         } else {
-            b.addField("Display name", escape(user.getName()), true);
-            b.addField("Status", "not in server", true);
+            b.addField("📛 Display name", escape(user.getName()), true);
+            b.addField("💭 Status", "not in server", true);
         }
 
         if (profile != null) {
@@ -191,16 +191,16 @@ public final class InfoCommand extends ListenerAdapter implements TextCommand {
             }
             if (profile.getAccentColor() != null) {
                 String hex = String.format("#%06X", 0xFFFFFF & profile.getAccentColor().getRGB());
-                b.addField("Accent color", "`" + hex + "`", true);
+                b.addField("🎨 Accent color", "`" + hex + "`", true);
             }
         }
 
         long mutuals = user.getMutualGuilds().size();
         if (mutuals > 0) {
-            b.addField("Mutual servers (bot-visible)", String.valueOf(mutuals), true);
+            b.addField("🤝 Mutual servers (bot-visible)", String.valueOf(mutuals), true);
         }
 
-        b.addField("Account created",
+        b.addField("📅 Account created",
                 "<t:" + created.toEpochSecond() + ":D> (<t:" + created.toEpochSecond() + ":R>)\n"
                         + accountAgeDays + " days old",
                 false);
@@ -208,28 +208,28 @@ public final class InfoCommand extends ListenerAdapter implements TextCommand {
         if (member != null) {
             OffsetDateTime joined = member.getTimeJoined().withOffsetSameInstant(ZoneOffset.UTC);
             long tenureDays = ChronoUnit.DAYS.between(joined.toLocalDate(), OffsetDateTime.now(ZoneOffset.UTC).toLocalDate());
-            b.addField("Joined this server",
+            b.addField("🚪 Joined this server",
                     "<t:" + joined.toEpochSecond() + ":D> (<t:" + joined.toEpochSecond() + ":R>)\n"
                             + tenureDays + " days in server",
                     false);
 
             OffsetDateTime boostingSince = member.getTimeBoosted();
             if (boostingSince != null) {
-                b.addField("Server booster", "since <t:" + boostingSince.toEpochSecond() + ":R>", true);
+                b.addField("💎 Server booster", "since <t:" + boostingSince.toEpochSecond() + ":R>", true);
             }
 
             OffsetDateTime timeoutEnd = member.getTimeOutEnd();
             if (timeoutEnd != null && timeoutEnd.isAfter(OffsetDateTime.now())) {
-                b.addField("Timed out", "ends <t:" + timeoutEnd.toEpochSecond() + ":R>", true);
+                b.addField("🔇 Timed out", "ends <t:" + timeoutEnd.toEpochSecond() + ":R>", true);
             }
 
             if (member.getVoiceState() != null && member.getVoiceState().getChannel() != null) {
-                b.addField("Voice", "in " + member.getVoiceState().getChannel().getAsMention(), true);
+                b.addField("🔊 Voice", "in " + member.getVoiceState().getChannel().getAsMention(), true);
             }
 
             Role highest = member.getRoles().isEmpty() ? null : member.getRoles().get(0);
             if (highest != null) {
-                b.addField("Highest role", highest.getAsMention(), true);
+                b.addField("👑 Highest role", highest.getAsMention(), true);
             }
 
             String roles = member.getRoles().isEmpty()
@@ -238,17 +238,17 @@ public final class InfoCommand extends ListenerAdapter implements TextCommand {
             if (member.getRoles().size() > 20) {
                 roles += " (+" + (member.getRoles().size() - 20) + " more)";
             }
-            b.addField("Roles (" + member.getRoles().size() + ")", roles, false);
+            b.addField("🎭 Roles (" + member.getRoles().size() + ")", roles, false);
 
             String perms = keyPermissions(member);
             if (!perms.isEmpty()) {
-                b.addField("Key permissions", perms, false);
+                b.addField("🔑 Key permissions", perms, false);
             }
         }
 
         String flags = userFlags(user);
         if (!flags.isEmpty()) {
-            b.addField("Account flags", flags, false);
+            b.addField("🚩 Account flags", flags, false);
         }
 
         b.setFooter("Ran for " + latencyMillis + " ms");

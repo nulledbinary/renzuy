@@ -28,25 +28,31 @@ public final class Embeds {
             "https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/2699.png";
     private Embeds() {}
 
-    public static MessageEmbed playing(String title) {
-        return new EmbedBuilder()
+    public static MessageEmbed playing(renzuy.youtube.AudioReference ref) {
+        EmbedBuilder b = new EmbedBuilder()
                 .setColor(PLAYING)
-                .setAuthor("Started playing", null, PLAY_ICON)
-                .setDescription("**" + escape(title) + "**")
-                .build();
+                .setAuthor("Now Playing", null, PLAY_ICON)
+                .setDescription("**[" + escape(ref.title()) + "](" + ref.webpageUrl() + ")**\n" + escape(ref.author()));
+        if (ref.thumbnailUrl() != null) {
+            b.setThumbnail(ref.thumbnailUrl());
+        }
+        return b.build();
     }
 
-    public static MessageEmbed queued(String title, int position) {
-        return new EmbedBuilder()
+    public static MessageEmbed queued(renzuy.youtube.AudioReference ref, int position) {
+        EmbedBuilder b = new EmbedBuilder()
                 .setColor(QUEUED)
-                .setAuthor("Queued", null, QUEUE_ICON)
-                .setDescription("**" + escape(title) + "**")
-                .setFooter("Position #" + position)
-                .build();
+                .setAuthor("Added to Queue", null, QUEUE_ICON)
+                .setDescription("**[" + escape(ref.title()) + "](" + ref.webpageUrl() + ")**\n" + escape(ref.author()))
+                .setFooter("Position #" + position);
+        if (ref.thumbnailUrl() != null) {
+            b.setThumbnail(ref.thumbnailUrl());
+        }
+        return b.build();
     }
 
     public static MessageEmbed playlistQueued(
-            String playlistTitle, int totalTracks, String firstTrackTitle,
+            String playlistTitle, int totalTracks, renzuy.youtube.AudioReference firstTrack,
             boolean startedNow, int firstPosition) {
         String header = startedNow ? "Started playing playlist" : "Queued playlist";
         EmbedBuilder b = new EmbedBuilder()
@@ -55,7 +61,10 @@ public final class Embeds {
                 .setDescription("**" + escape(playlistTitle == null ? "Playlist" : playlistTitle) + "**\n"
                         + totalTracks + " track" + (totalTracks == 1 ? "" : "s"));
         b.addField(startedNow ? "Now playing" : "First track",
-                "**" + escape(firstTrackTitle) + "**", false);
+                "**[" + escape(firstTrack.title()) + "](" + firstTrack.webpageUrl() + ")**", false);
+        if (firstTrack.thumbnailUrl() != null) {
+            b.setThumbnail(firstTrack.thumbnailUrl());
+        }
         if (!startedNow) {
             b.setFooter("First at position #" + firstPosition);
         } else if (totalTracks > 1) {
@@ -126,7 +135,7 @@ public final class Embeds {
                 .build();
     }
 
-    private static String escape(String s) {
+    public static String escape(String s) {
         if (s == null) return "";
         return s.replace("\\", "\\\\")
                 .replace("*", "\\*")

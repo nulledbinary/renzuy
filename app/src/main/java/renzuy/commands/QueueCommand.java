@@ -121,24 +121,36 @@ public final class QueueCommand extends ListenerAdapter implements TextCommand {
     }
 
     private static MessageEmbed buildEmbed(AudioReference now, List<AudioReference> pending, int page, int totalPages) {
-        EmbedBuilder builder = new EmbedBuilder().setColor(Embeds.QUEUED).setTitle("Queue");
-        StringBuilder body = new StringBuilder();
+        EmbedBuilder builder = new EmbedBuilder().setColor(Embeds.QUEUED).setTitle("🎶 Player Queue");
+        
         if (now != null) {
-            body.append("**Now playing:** ").append(now.title()).append("\n\n");
+            builder.addField("▶️ Now Playing", "**[" + Embeds.escape(now.title()) + "](" + now.webpageUrl() + ")**\n`" + Embeds.escape(now.author()) + "`", false);
+            if (now.thumbnailUrl() != null) {
+                builder.setThumbnail(now.thumbnailUrl());
+            }
         }
+        
+        StringBuilder body = new StringBuilder();
         if (pending.isEmpty()) {
-            body.append("_Queue is empty._");
-            return builder.setDescription(body.toString()).build();
+            if (now == null) {
+                body.append("_Queue is empty._");
+            } else {
+                body.append("\n_No more tracks in queue._");
+            }
+        } else {
+            int start = page * PAGE_SIZE;
+            int end = Math.min(start + PAGE_SIZE, pending.size());
+            body.append("📜 **Up Next** (").append(pending.size()).append(" total):\n\n");
+            for (int i = start; i < end; i++) {
+                body.append("`").append(i + 1).append(".` **").append(Embeds.escape(pending.get(i).title())).append("**\n");
+            }
         }
-        int start = page * PAGE_SIZE;
-        int end = Math.min(start + PAGE_SIZE, pending.size());
-        body.append("**Up next** (").append(pending.size()).append(" total):\n");
-        for (int i = start; i < end; i++) {
-            body.append("`").append(i + 1).append(".` ").append(pending.get(i).title()).append('\n');
+        
+        if (body.length() > 0) {
+            builder.setDescription(body.toString());
         }
-        builder.setDescription(body.toString());
         if (totalPages > 1) {
-            builder.setFooter("Page " + (page + 1) + " / " + totalPages);
+            builder.setFooter("Page " + (page + 1) + " of " + totalPages, "https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f4cb.png");
         }
         return builder.build();
     }
