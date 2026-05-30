@@ -18,6 +18,7 @@ import net.dv8tion.jda.api.entities.Member;
 public enum Capability {
 
     EVERYONE(),
+    MANAGE_SERVER(Permission.MANAGE_SERVER),
     MANAGE_PREFIX(Permission.MANAGE_SERVER),
     PURGE_MESSAGES(Permission.MESSAGE_MANAGE),
     TIMEOUT_MEMBERS(Permission.MODERATE_MEMBERS),

@@ -393,7 +393,7 @@ public final class YtDlpFallback {
         cmd.add("--print"); cmd.add("uploader");
         cmd.add("--print"); cmd.add("webpage_url");
         cmd.add("--print"); cmd.add("id");
-        cmd.add("--format"); cmd.add("bestaudio/best");
+        cmd.add("--format"); cmd.add("bestaudio/bestvideo+bestaudio/best/ba/b");
         cmd.add(target);
         return cmd;
     }

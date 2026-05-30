@@ -36,6 +36,11 @@ public final class TambayCommand extends ListenerAdapter {
             return;
         }
 
+        if (!Capability.MANAGE_SERVER.grantedTo(member)) {
+            event.replyEmbeds(Embeds.warn("You need the **Manage Server** permission to use `/tambay`.")).setEphemeral(true).queue();
+            return;
+        }
+
         try {
             guild.getAudioManager().openAudioConnection(voice);
             isActive = true;
