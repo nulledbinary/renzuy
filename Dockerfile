@@ -35,6 +35,17 @@ RUN set -eux \
  && apt-get install -y --no-install-recommends ffmpeg python3 python3-pip ca-certificates curl unzip iproute2 nodejs \
  && python3 -m pip install --no-cache-dir --break-system-packages "yt-dlp[default,curl-cffi]" \
  && python3 -m pip install --no-cache-dir --break-system-packages bgutil-ytdlp-pot-provider \
+ # The bgutil plugin forwards yt-dlp's --proxy to the PoT sidecar, which then
+ # fetches its BotGuard challenge from google.com through that proxy. Bright
+ # Data zones 403 google.com at the CONNECT stage (only youtube.com/googlevideo
+ # are allowed), so a forwarded proxy means no token is ever minted and yt-dlp
+ # stalls on the provider until the 25 s process timeout. Strip the forwarding:
+ # the sidecar shares this task's network namespace and mints directly from the
+ # task IP, which Google serves the challenge to. The grep makes an upstream
+ # rewrite of this line a loud build failure instead of a silent regression.
+ && PLUGIN_FILE=$(python3 -c "import importlib.util; print(importlib.util.find_spec('yt_dlp_plugins.extractor.getpot_bgutil_http').origin)") \
+ && sed -i "s/'proxy': request\.request_proxy,/'proxy': None,/" "$PLUGIN_FILE" \
+ && grep -q "'proxy': None," "$PLUGIN_FILE" \
  && curl -s "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" \
  && unzip -q awscliv2.zip \
  && ./aws/install \

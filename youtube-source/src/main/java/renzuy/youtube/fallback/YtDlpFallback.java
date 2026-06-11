@@ -36,7 +36,9 @@ import renzuy.youtube.Ipv6Block;
  *       built into this runtime (detected once at construction).</li>
  *   <li><b>Internal retry</b> — a single wall doesn't trip the breaker; we
  *       retry once with a different impersonate target. Almost every
- *       transient wall heals on the second attempt.</li>
+ *       transient wall heals on the second attempt. Direct connections only:
+ *       through a proxy the retry would be byte-identical (same command, same
+ *       session-pinned egress IP), so a proxied wall fails fast instead.</li>
  *   <li><b>Cookies</b> — if {@code YT_DLP_COOKIES} points at a Netscape
  *       cookies file, {@code mweb} leads. Otherwise {@code tv_embedded}
  *       leads (most resilient anon client).</li>
@@ -289,15 +291,21 @@ public final class YtDlpFallback {
                     firstImpersonate == null ? "(none)" : firstImpersonate, describable);
             return out;
         } catch (BotChallengeException firstWall) {
-            // Retry: use a different impersonate target only when NOT going through a proxy.
-            String retryImpersonate = hasProxy ? null : randomImpersonate(firstImpersonate);
+            // Through a proxy the retry would be byte-identical — same command,
+            // same session-pinned egress IP — so the wall is deterministic and a
+            // second run only burns up to PROCESS_TIMEOUT_SECONDS. Fail fast.
+            if (hasProxy) {
+                if (youTubeTarget) {
+                    tripBreaker();
+                }
+                throw firstWall;
+            }
+            String retryImpersonate = randomImpersonate(firstImpersonate);
             log.info("[yt-dlp] wall hit with impersonate={} — retrying with {}",
-                    firstImpersonate == null ? "(none)" : firstImpersonate,
-                    retryImpersonate == null ? "(none)" : retryImpersonate);
+                    firstImpersonate, retryImpersonate);
             try {
                 String out = runYtDlp(builder.build(new Attempt(retryImpersonate)));
-                log.info("[yt-dlp] retry succeeded with impersonate={}",
-                        retryImpersonate == null ? "(none)" : retryImpersonate);
+                log.info("[yt-dlp] retry succeeded with impersonate={}", retryImpersonate);
                 return out;
             } catch (BotChallengeException secondWall) {
                 if (youTubeTarget) {
@@ -394,7 +402,7 @@ public final class YtDlpFallback {
     private void tripBreaker() {
         long until = System.currentTimeMillis() + BOT_CHALLENGE_BACKOFF_MILLIS;
         botChallengeUntil.set(until);
-        log.warn("[yt-dlp] YouTube bot wall persisted across two impersonate targets — pausing YouTube fallback for {}s",
+        log.warn("[yt-dlp] YouTube bot wall is holding — pausing YouTube fallback for {}s",
                 BOT_CHALLENGE_BACKOFF_MILLIS / 1000L);
     }
 

@@ -3,6 +3,7 @@ package renzuy.audio;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ThreadLocalRandom;
 import net.dv8tion.jda.api.entities.Guild;
 import net.dv8tion.jda.api.managers.AudioManager;
 import renzuy.DotEnv;
@@ -71,8 +72,31 @@ public final class MusicService {
                     + "Running WITHOUT a proxy.");
             return "";
         }
-        System.out.println("[MusicService] YouTube pipeline routed through proxy " + parsed.get());
-        return raw.trim();
+        String pinned = pinBrightDataSession(parsed.get());
+        System.out.println("[MusicService] YouTube pipeline routed through proxy "
+                + ProxyUrl.parse(pinned).orElseThrow());
+        return pinned;
+    }
+
+    /**
+     * Bright Data zones without a {@code -session-<id>} username suffix hand out a
+     * different egress IP per connection. Rotation is fatal for this pipeline:
+     * googlevideo stream URLs are bound to the IP that minted them, so the
+     * resolver, the stream probe and the ffmpeg fetch must all leave through the
+     * same peer. Pinning a random per-boot session keeps every hop on one IP and
+     * lets a task restart draw a fresh peer if the current one gets flagged.
+     * Operator-chosen sessions (already containing {@code -session-}) win.
+     */
+    static String pinBrightDataSession(ProxyUrl proxy) {
+        if (!proxy.host().endsWith(".superproxy.io")
+                || !proxy.username().contains("-zone-")
+                || proxy.username().contains("-session-")) {
+            return proxy.url();
+        }
+        String session = Long.toUnsignedString(ThreadLocalRandom.current().nextLong(), 36);
+        return "http://" + proxy.username() + "-session-" + session
+                + ":" + proxy.password()
+                + "@" + proxy.host() + ":" + proxy.port();
     }
 
     public YoutubeSource getSource() {
