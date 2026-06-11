@@ -67,8 +67,8 @@ public record YoutubeSourceOptions(
 
     /** Mutable builder; every field has a low-latency default. */
     public static final class Builder {
-        private Duration connectTimeout = Duration.ofSeconds(3);
-        private Duration requestTimeout = Duration.ofSeconds(6);
+        private Duration connectTimeout = Duration.ofSeconds(10);
+        private Duration requestTimeout = Duration.ofSeconds(15);
         private Duration cacheTtl = Duration.ofMinutes(30);
         private int cacheMaxEntries = 512;
         private boolean fallbackEnabled = true;

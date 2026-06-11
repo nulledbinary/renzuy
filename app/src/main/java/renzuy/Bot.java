@@ -51,6 +51,9 @@ import renzuy.store.StateStores;
 public final class Bot {
 
     public static void main(String[] args) throws InterruptedException {
+        // Must be set before any network classes are initialized or loaded by JDA.
+        System.setProperty("jdk.http.auth.tunneling.disabledSchemes", "");
+
         String token = DotEnv.get("DISCORD_TOKEN");
         if (token == null || token.isBlank()) {
             System.err.println("DISCORD_TOKEN is not set. Put it in a .env file at the project root, "

@@ -36,7 +36,12 @@ java {
 application {
     mainClass = 'renzuy.Bot'
     // jdave uses the Foreign Function & Memory API to load libdave natives.
-    applicationDefaultJvmArgs = ['--enable-native-access=ALL-UNNAMED']
+    // -Djdk.http.auth.tunneling.disabledSchemes= is required to enable Basic
+    // auth over HTTPS CONNECT tunnels for the JDK HttpClient.
+    applicationDefaultJvmArgs = [
+        '--enable-native-access=ALL-UNNAMED',
+        '-Djdk.http.auth.tunneling.disabledSchemes='
+    ]
 }
 
 tasks.named('run') {
