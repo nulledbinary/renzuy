@@ -50,14 +50,16 @@ public final class HelpCommand extends ListenerAdapter implements TextCommand {
             new Entry("purge <count>", "Bulk-delete up to 100 recent messages", Capability.PURGE_MESSAGES),
             new Entry("tempmute <user> <duration>", "Discord timeout — e.g. 30s, 15m, 2h, 7d", Capability.TIMEOUT_MEMBERS),
             new Entry("tempban <user> <duration>", "Ban with scheduled auto-unban", Capability.BAN_MEMBERS),
-            new Entry("log", "Bind this channel as the server event log", Capability.VIEW_LOGS),
+            new Entry("bind <category>", "Route a log category (confession, nickname, …) to this channel (slash only)", Capability.VIEW_LOGS),
+            new Entry("unbind <category>", "Stop routing a log category (slash only)", Capability.VIEW_LOGS),
             new Entry("hatewarn <count> <punishment>", "Configure warnings threshold + punishment for hate-speech (slash only)", Capability.TIMEOUT_MEMBERS),
             new Entry("tambay", "Join the voice channel to idle and chill (slash only)", Capability.MANAGE_SERVER),
             new Entry("count", "Bind this channel for the counting game (slash only)", Capability.MANAGE_SERVER)
     );
 
     private static final List<Entry> ADMIN = List.of(
-            new Entry("prefix <char>", "Change the text-command prefix (slash only)", Capability.MANAGE_PREFIX)
+            new Entry("prefix <char>", "Change the text-command prefix (slash only)", Capability.MANAGE_PREFIX),
+            new Entry("lockdown", "Lock / unlock the current channel — admins only (slash only)", Capability.ADMINISTRATOR)
     );
 
     private final PrefixStore prefixes;
@@ -97,16 +99,20 @@ public final class HelpCommand extends ListenerAdapter implements TextCommand {
                                             ACK_AUTO_DELETE_SECONDS, TimeUnit.SECONDS, v -> {}, e -> {}),
                                             e -> {});
                         },
-                        err -> fallbackInChannel(event, embed, author)),
-                err -> fallbackInChannel(event, embed, author));
+                        err -> fallbackInChannel(event, author)),
+                err -> fallbackInChannel(event, author));
     }
 
-    /** DMs failed (closed DMs) — post the embed in channel and self-destruct it. */
-    private static void fallbackInChannel(MessageReceivedEvent event, MessageEmbed embed, User author) {
-        event.getChannel().sendMessage("DMs closed — temporary in-channel listing for "
-                        + author.getAsMention())
-                .addEmbeds(embed)
-                .queue(msg -> msg.delete().queueAfter(20L, TimeUnit.SECONDS, v -> {}, e -> {}),
+    /**
+     * DMs failed (closed DMs) — never dump the listing in channel: it reveals
+     * which commands the caller can run to everyone watching. Point them at
+     * {@code /help} instead, whose reply is ephemeral, and self-destruct the hint.
+     */
+    private static void fallbackInChannel(MessageReceivedEvent event, User author) {
+        event.getChannel().sendMessage(author.getAsMention()
+                        + " — your DMs are closed, so I can't send the command list privately."
+                        + " Use **/help** instead; its reply is only visible to you.")
+                .queue(msg -> msg.delete().queueAfter(ACK_AUTO_DELETE_SECONDS, TimeUnit.SECONDS, v -> {}, e -> {}),
                         e -> {});
         event.getMessage().delete().queue(v -> {}, e -> {});
     }

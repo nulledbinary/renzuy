@@ -421,6 +421,14 @@ public final class YtDlpFallback {
         cmd.add("--retries"); cmd.add("3");
         cmd.add("--user-agent"); cmd.add(STREAM_USER_AGENT);
         cmd.add("--extractor-args"); cmd.add(buildExtractorArgs());
+        if (!potProviderUrl.isBlank()) {
+            // bgutil-ytdlp-pot-provider ≥ 1.0 reads its endpoint from its own
+            // extractor-args namespace (the pre-1.0 getpot_bgutil_baseurl key
+            // under youtube: is silently ignored by current plugin builds —
+            // observed as the POT sidecar receiving zero mint requests).
+            cmd.add("--extractor-args");
+            cmd.add("youtubepot-bgutilhttp:base_url=" + potProviderUrl);
+        }
         cmd.add("--impersonate"); cmd.add(attempt.impersonateTarget());
         if (!proxy.isBlank()) {
             cmd.add("--proxy"); cmd.add(proxy);
@@ -452,12 +460,9 @@ public final class YtDlpFallback {
             // mweb.gvs is the broadly-applicable choice for non-web clients.
             sb.append(";po_token=mweb.gvs+").append(poToken);
         }
-        if (!potProviderUrl.isBlank()) {
-            // bgutil-ytdlp-pot-provider plugin: tells the plugin which HTTP
-            // endpoint to call for fresh tokens. Auto-discovers localhost:4416
-            // by default; explicit here so it's visible and overridable.
-            sb.append(";getpot_bgutil_baseurl=").append(potProviderUrl);
-        }
+        // The provider endpoint is passed in its own namespace
+        // (youtubepot-bgutilhttp:base_url=…) by newBaseCommand — modern
+        // bgutil plugin builds no longer read it from the youtube: namespace.
         return sb.toString();
     }
 

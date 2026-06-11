@@ -17,6 +17,12 @@ dependencies {
     runtimeOnly libs.jdave.natives.linux
     implementation libs.slf4j.simple
 
+    // DynamoDB persistence for counting / log bindings / confession audit.
+    // url-connection-client keeps the HTTP stack on the JDK's HttpURLConnection
+    // instead of pulling Netty into the runtime image.
+    implementation libs.awssdk.dynamodb
+    runtimeOnly libs.awssdk.url.connection.client
+
     testImplementation libs.junit.jupiter
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }

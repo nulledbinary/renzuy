@@ -17,13 +17,14 @@ import net.dv8tion.jda.api.utils.MemberCachePolicy;
 import net.dv8tion.jda.api.utils.cache.CacheFlag;
 import renzuy.audio.MusicService;
 import renzuy.commands.AfkCommand;
+import renzuy.commands.BindCommand;
 import renzuy.commands.CommandRegistrar;
 import renzuy.commands.ConfessCommand;
 import renzuy.commands.CountCommand;
 import renzuy.commands.HateWarnCommand;
 import renzuy.commands.HelpCommand;
 import renzuy.commands.InfoCommand;
-import renzuy.commands.LogCommand;
+import renzuy.commands.LockdownCommand;
 import renzuy.commands.PlayCommand;
 import renzuy.commands.PrefixCommand;
 import renzuy.commands.PurgeCommand;
@@ -37,10 +38,15 @@ import renzuy.commands.TempMuteCommand;
 import renzuy.commands.moderation.UnbanScheduler;
 import renzuy.commands.text.TextCommandRouter;
 import renzuy.config.PrefixStore;
+import renzuy.confession.ConfessionAudit;
 import renzuy.counting.CountingStore;
+import renzuy.logging.BindStore;
+import renzuy.logging.ServerLogger;
 import renzuy.moderation.AutoModerator;
 import renzuy.moderation.HateWarnConfig;
 import renzuy.moderation.RaidGuard;
+import renzuy.store.StateStore;
+import renzuy.store.StateStores;
 
 public final class Bot {
 
@@ -56,7 +62,10 @@ public final class Bot {
         PrefixStore prefixes = PrefixStore.defaultLocation();
         UnbanScheduler unbanScheduler = new UnbanScheduler();
         HateWarnConfig hateWarnConfig = HateWarnConfig.defaultLocation();
-        CountingStore countingStore = CountingStore.defaultLocation();
+        StateStore stateStore = StateStores.fromEnv();
+        CountingStore countingStore = new CountingStore(stateStore);
+        BindStore bindStore = new BindStore(stateStore);
+        ConfessionAudit confessionAudit = new ConfessionAudit(stateStore, bindStore);
 
         HelpCommand    helpCommand    = new HelpCommand(prefixes);
         PlayCommand    playCommand    = new PlayCommand(music);
@@ -69,13 +78,15 @@ public final class Bot {
         PurgeCommand   purgeCommand   = new PurgeCommand();
         TempMuteCommand tempMuteCommand = new TempMuteCommand();
         TempBanCommand  tempBanCommand  = new TempBanCommand(unbanScheduler);
-        LogCommand      logCommand      = new LogCommand();
+        BindCommand     bindCommand     = new BindCommand(bindStore);
+        ServerLogger    serverLogger    = new ServerLogger(bindStore);
+        LockdownCommand lockdownCommand = new LockdownCommand(stateStore);
         AfkCommand      afkCommand      = new AfkCommand();
         HateWarnCommand hateWarnCommand = new HateWarnCommand(hateWarnConfig);
         AutoModerator   autoModerator   = new AutoModerator(hateWarnConfig, unbanScheduler);
         RaidGuard       raidGuard       = new RaidGuard();
         TambayCommand   tambayCommand   = new TambayCommand();
-        ConfessCommand  confessCommand  = new ConfessCommand();
+        ConfessCommand  confessCommand  = new ConfessCommand(confessionAudit);
         CountCommand    countCommand    = new CountCommand(countingStore);
 
         SlashCommandData[] commands = {
@@ -122,8 +133,18 @@ public final class Bot {
                         .addOption(OptionType.STRING, TempBanCommand.DURATION_OPTION, "Duration: e.g. 30m, 2h, 7d", true)
                         .addOption(OptionType.STRING, TempBanCommand.REASON_OPTION,   "Reason (audit log)", false)
                         .setDefaultPermissions(DefaultMemberPermissions.enabledFor(Permission.BAN_MEMBERS)),
-                Commands.slash(LogCommand.NAME, "Bind this channel as the server-event log sink")
+                Commands.slash(BindCommand.NAME, "Bind a log category (confession, nickname, …) to this channel")
+                        .addOptions(new OptionData(OptionType.STRING, BindCommand.CATEGORY_OPTION,
+                                "Which events to log here — or `all`", true)
+                                .setAutoComplete(true))
                         .setDefaultPermissions(DefaultMemberPermissions.enabledFor(Permission.VIEW_AUDIT_LOGS)),
+                Commands.slash(BindCommand.UNBIND_NAME, "Stop routing a log category")
+                        .addOptions(new OptionData(OptionType.STRING, BindCommand.CATEGORY_OPTION,
+                                "Which category to unbind — or `all`", true)
+                                .setAutoComplete(true))
+                        .setDefaultPermissions(DefaultMemberPermissions.enabledFor(Permission.VIEW_AUDIT_LOGS)),
+                Commands.slash(LockdownCommand.NAME, "Admin: toggle a full lockdown of this channel (reason via form)")
+                        .setDefaultPermissions(DefaultMemberPermissions.enabledFor(Permission.ADMINISTRATOR)),
                 Commands.slash(HateWarnCommand.NAME, "Configure auto-punishment after N hate-speech warnings")
                         .addOptions(new OptionData(OptionType.INTEGER, HateWarnCommand.COUNT_OPTION,
                                 "Warnings before punishment (1–20)", true)
@@ -153,7 +174,8 @@ public final class Bot {
                 .addEventListeners(
                         helpCommand, playCommand, stopCommand, skipCommand,
                         queueCommand, removeCommand, infoCommand, prefixCommand,
-                        purgeCommand, tempMuteCommand, tempBanCommand, logCommand,
+                        purgeCommand, tempMuteCommand, tempBanCommand,
+                        bindCommand, serverLogger, lockdownCommand, confessionAudit,
                         afkCommand, hateWarnCommand, autoModerator, raidGuard,
                         tambayCommand, confessCommand, countCommand, router,
                         new CommandRegistrar(commands))

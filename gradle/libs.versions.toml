@@ -4,6 +4,7 @@ jdave = "0.1.7"
 slf4j = "2.0.16"
 jackson = "2.18.2"
 junit-jupiter = "5.12.1"
+awssdk = "2.46.7"
 
 [libraries]
 jda = { module = "net.dv8tion:JDA", version.ref = "jda" }
@@ -14,3 +15,5 @@ slf4j-simple = { module = "org.slf4j:slf4j-simple", version.ref = "slf4j" }
 slf4j-api = { module = "org.slf4j:slf4j-api", version.ref = "slf4j" }
 jackson-databind = { module = "com.fasterxml.jackson.core:jackson-databind", version.ref = "jackson" }
 junit-jupiter = { module = "org.junit.jupiter:junit-jupiter", version.ref = "junit-jupiter" }
+awssdk-dynamodb = { module = "software.amazon.awssdk:dynamodb", version.ref = "awssdk" }
+awssdk-url-connection-client = { module = "software.amazon.awssdk:url-connection-client", version.ref = "awssdk" }

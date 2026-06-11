@@ -1,4 +1,4 @@
-package renzuy.commands;
+package renzuy.logging;
 
 import java.awt.Color;
 import java.time.OffsetDateTime;
@@ -8,7 +8,6 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import net.dv8tion.jda.api.EmbedBuilder;
 import net.dv8tion.jda.api.audit.ActionType;
 import net.dv8tion.jda.api.audit.AuditLogEntry;
@@ -26,28 +25,28 @@ import net.dv8tion.jda.api.events.guild.member.GuildMemberRemoveEvent;
 import net.dv8tion.jda.api.events.guild.member.update.GuildMemberUpdateNicknameEvent;
 import net.dv8tion.jda.api.events.guild.member.update.GuildMemberUpdateTimeOutEvent;
 import net.dv8tion.jda.api.events.guild.voice.GuildVoiceUpdateEvent;
-import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent;
 import net.dv8tion.jda.api.events.message.MessageDeleteEvent;
 import net.dv8tion.jda.api.events.message.MessageReceivedEvent;
 import net.dv8tion.jda.api.events.message.MessageUpdateEvent;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
 import org.jetbrains.annotations.NotNull;
-import renzuy.ui.Embeds;
 
 /**
  * Audit-style server logger.
  *
- * <p>Embeds every chat event with the full content snapshot: deleted messages
- * surface the original text + any attachment URLs (images, GIFs, files); edits
- * show before/after; member/voice/ban events render as rich embeds.
+ * <p>Each event family is routed to the channel bound for its
+ * {@link LogCategory} via {@code /bind} — there is no single log sink anymore,
+ * and bindings persist across restarts through {@link BindStore}.
+ *
+ * <p>Embeds carry the full content snapshot: deleted messages surface the
+ * original text + any attachment URLs (images, GIFs, files); edits show
+ * before/after; member/voice/ban events render as rich embeds.
  *
  * <p>To support deletion logging the bot keeps a short-lived in-memory cache of
  * every message it sees (bounded LRU) — Discord's delete event does not carry
  * the original content, so we cache on receipt and look up on delete.
  */
-public final class LogCommand extends ListenerAdapter {
-
-    public static final String NAME = "log";
+public final class ServerLogger extends ListenerAdapter {
 
     private static final DateTimeFormatter STAMP = DateTimeFormatter.ofPattern("HH:mm:ss");
     private static final Color C_CREATE = new Color(0x57F287);
@@ -64,8 +63,7 @@ public final class LogCommand extends ListenerAdapter {
             List<String> attachmentUrls, List<String> stickerUrls,
             OffsetDateTime createdAt) {}
 
-    /** Guild ID → message-channel ID. Concurrent because events come in on JDA's pool. */
-    private final Map<Long, Long> logChannelByGuild = new ConcurrentHashMap<>();
+    private final BindStore binds;
 
     /** Bounded LRU of recent messages so we can render deletions with content. */
     private final Map<Long, CachedMessage> messageCache = Collections.synchronizedMap(
@@ -76,63 +74,22 @@ public final class LogCommand extends ListenerAdapter {
                 }
             });
 
-    // ---------------- /log slash entry ----------------
-
-    @Override
-    public void onSlashCommandInteraction(@NotNull SlashCommandInteractionEvent event) {
-        if (!event.getName().equals(NAME)) return;
-
-        Guild guild = event.getGuild();
-        if (guild == null) {
-            event.replyEmbeds(Embeds.warn("This command can only be used in a server."))
-                    .setEphemeral(true).queue();
-            return;
-        }
-        Member member = event.getMember();
-        if (!Capability.VIEW_LOGS.grantedTo(member)) {
-            event.replyEmbeds(Embeds.warn("You need **View Audit Log** or **Manage Server** to use `/log`."))
-                    .setEphemeral(true).queue();
-            return;
-        }
-        if (!event.getChannel().getType().isMessage()) {
-            event.replyEmbeds(Embeds.error("Run `/log` in a normal text channel — that's where events will be posted."))
-                    .setEphemeral(true).queue();
-            return;
-        }
-        long channelId = event.getChannelIdLong();
-        Long previous = logChannelByGuild.put(guild.getIdLong(), channelId);
-        String body = previous == null
-                ? "**Logging enabled here.** Server events will be posted to this channel."
-                : previous == channelId
-                        ? "This channel is already the log sink."
-                        : "Moved logging here from <#" + previous + ">.";
-        event.replyEmbeds(Embeds.info(body)).setEphemeral(true).queue();
+    public ServerLogger(BindStore binds) {
+        this.binds = binds;
     }
 
-    // ---------------- helpers ----------------
+    // ---------------- routing ----------------
 
-    private void post(Guild guild, MessageEmbed embed) {
-        Long channelId = logChannelByGuild.get(guild.getIdLong());
-        if (channelId == null) return;
-        GuildMessageChannel channel = guild.getChannelById(GuildMessageChannel.class, channelId);
-        if (channel == null) {
-            logChannelByGuild.remove(guild.getIdLong(), channelId);
-            return;
-        }
-        if (!guild.getSelfMember().hasAccess(channel)) return;
-        channel.sendMessageEmbeds(embed).queue(v -> {}, err -> {});
+    private void post(Guild guild, LogCategory category, MessageEmbed embed) {
+        postMany(guild, category, List.of(embed));
     }
 
-    private void postMany(Guild guild, List<MessageEmbed> embeds) {
+    private void postMany(Guild guild, LogCategory category, List<MessageEmbed> embeds) {
         if (embeds.isEmpty()) return;
-        Long channelId = logChannelByGuild.get(guild.getIdLong());
+        Long channelId = binds.channelFor(guild.getIdLong(), category);
         if (channelId == null) return;
         GuildMessageChannel channel = guild.getChannelById(GuildMessageChannel.class, channelId);
-        if (channel == null) {
-            logChannelByGuild.remove(guild.getIdLong(), channelId);
-            return;
-        }
-        if (!guild.getSelfMember().hasAccess(channel)) return;
+        if (channel == null || !guild.getSelfMember().hasAccess(channel)) return;
         // Discord allows up to 10 embeds per message.
         for (int i = 0; i < embeds.size(); i += 10) {
             channel.sendMessageEmbeds(embeds.subList(i, Math.min(i + 10, embeds.size())))
@@ -202,7 +159,7 @@ public final class LogCommand extends ListenerAdapter {
         }
         b.addField("Jump", "[Open in channel](" + after.getJumpUrl() + ")", false);
 
-        post(event.getGuild(), b.build());
+        post(event.getGuild(), LogCategory.MESSAGE_EDIT, b.build());
         // Refresh cache so subsequent edits diff against the latest body.
         cache(after);
     }
@@ -277,7 +234,7 @@ public final class LogCommand extends ListenerAdapter {
         List<MessageEmbed> all = new ArrayList<>();
         all.add(b.build());
         all.addAll(extra);
-        postMany(event.getGuild(), all);
+        postMany(event.getGuild(), LogCategory.MESSAGE_DELETE, all);
     }
 
     // ---------------- member events ----------------
@@ -297,7 +254,7 @@ public final class LogCommand extends ListenerAdapter {
                 .addField("Account age", ageDays + " days", true)
                 .setFooter(STAMP.format(OffsetDateTime.now()))
                 .build();
-        post(event.getGuild(), embed);
+        post(event.getGuild(), LogCategory.MEMBER_JOIN, embed);
     }
 
     @Override
@@ -310,7 +267,7 @@ public final class LogCommand extends ListenerAdapter {
                 .setDescription("**" + u.getAsTag() + "** (`" + u.getId() + "`) left or was removed.")
                 .setFooter(STAMP.format(OffsetDateTime.now()))
                 .build();
-        post(event.getGuild(), embed);
+        post(event.getGuild(), LogCategory.MEMBER_LEAVE, embed);
     }
 
     @Override
@@ -325,7 +282,7 @@ public final class LogCommand extends ListenerAdapter {
                 .addField("After", "`" + after + "`", true)
                 .setFooter(STAMP.format(OffsetDateTime.now()))
                 .build();
-        post(event.getGuild(), embed);
+        post(event.getGuild(), LogCategory.NICKNAME, embed);
     }
 
     @Override
@@ -334,7 +291,7 @@ public final class LogCommand extends ListenerAdapter {
         String body = until == null
                 ? event.getMember().getAsMention() + " timeout ended."
                 : event.getMember().getAsMention() + " timed out until <t:" + until.toEpochSecond() + ":R>.";
-        post(event.getGuild(), event(C_MUTE, "Timeout updated", body));
+        post(event.getGuild(), LogCategory.TIMEOUT, event(C_MUTE, "Timeout updated", body));
     }
 
     // ---------------- ban events ----------------
@@ -353,17 +310,17 @@ public final class LogCommand extends ListenerAdapter {
             String body = "**" + event.getUser().getAsTag() + "** (`" + event.getUser().getId()
                     + "`) was banned.\nBy: " + moderator
                     + (reason == null ? "" : "\nReason: " + reason);
-            post(guild, event(C_DELETE, "User banned", body));
+            post(guild, LogCategory.BAN, event(C_DELETE, "User banned", body));
         }, err -> {
             String body = "**" + event.getUser().getAsTag() + "** (`" + event.getUser().getId() + "`) was banned.";
-            post(guild, event(C_DELETE, "User banned", body));
+            post(guild, LogCategory.BAN, event(C_DELETE, "User banned", body));
         });
     }
 
     @Override
     public void onGuildUnban(@NotNull GuildUnbanEvent event) {
         String body = "**" + event.getUser().getAsTag() + "** (`" + event.getUser().getId() + "`) was unbanned.";
-        post(event.getGuild(), event(C_CREATE, "User unbanned", body));
+        post(event.getGuild(), LogCategory.UNBAN, event(C_CREATE, "User unbanned", body));
     }
 
     // ---------------- voice events ----------------
@@ -383,7 +340,7 @@ public final class LogCommand extends ListenerAdapter {
         } else {
             return;
         }
-        post(event.getGuild(), event(C_VOICE, "Voice update", body));
+        post(event.getGuild(), LogCategory.VOICE, event(C_VOICE, "Voice update", body));
     }
 
     // ---------------- utilities ----------------
@@ -409,18 +366,5 @@ public final class LogCommand extends ListenerAdapter {
         while (end < text.length() && !Character.isWhitespace(text.charAt(end))) end++;
         String candidate = text.substring(idx, end);
         return (candidate.startsWith("http://") || candidate.startsWith("https://")) ? candidate : null;
-    }
-
-    public void handleText(MessageReceivedEvent event) {
-        Member member = event.getMember();
-        if (!Capability.VIEW_LOGS.grantedTo(member)) {
-            event.getMessage().reply("You need **View Audit Log** or **Manage Server** to use `log`.")
-                    .mentionRepliedUser(false).queue();
-            return;
-        }
-        long channelId = event.getChannel().getIdLong();
-        logChannelByGuild.put(event.getGuild().getIdLong(), channelId);
-        event.getMessage().reply("Logging enabled here. Server events will be posted to this channel.")
-                .mentionRepliedUser(false).queue();
     }
 }
