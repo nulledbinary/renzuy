@@ -272,28 +272,32 @@ public final class YtDlpFallback {
     private record Attempt(String impersonateTarget) {}
 
     private String runWithRetry(CommandBuilder builder, boolean youTubeTarget, String describable) {
-        // When a proxy is configured, skip --impersonate on the first attempt.
-        // curl_cffi's TLS-fingerprinting stack breaks CONNECT tunnel negotiation
-        // through HTTP proxies (returns 400). Standard curl handles CONNECT fine.
-        // We only promote impersonation to the retry stage if a bot wall is actually
-        // confirmed on the plain first attempt — keeping the defence without the
-        // proxy-incompatibility.
+        // When a proxy is configured, NEVER use --impersonate on either attempt.
+        // curl_cffi's TLS-fingerprinting stack is incompatible with HTTP CONNECT
+        // tunnel negotiation — the proxy returns 400 or the connection hangs until
+        // our 25 s timeout fires.  The residential proxy itself provides IP diversity
+        // and is the primary anti-bot layer; TLS fingerprinting is redundant and
+        // actively harmful here.
+        //
+        // Without a proxy (direct connection) we rotate impersonate targets across
+        // both attempts as before.
         boolean hasProxy = !proxy.isBlank();
-        String firstImpersonate = hasProxy ? null : randomImpersonate(null);
+        String firstImpersonate  = hasProxy ? null : randomImpersonate(null);
         try {
             String out = runYtDlp(builder.build(new Attempt(firstImpersonate)));
             log.debug("[yt-dlp] ok impersonate={} target_for={}",
                     firstImpersonate == null ? "(none)" : firstImpersonate, describable);
             return out;
         } catch (BotChallengeException firstWall) {
-            // First attempt hit a wall — retry with an impersonate target regardless
-            // of whether a proxy is present; a real bot wall warrants fingerprinting.
-            String retryTarget = randomImpersonate(firstImpersonate);
+            // Retry: use a different impersonate target only when NOT going through a proxy.
+            String retryImpersonate = hasProxy ? null : randomImpersonate(firstImpersonate);
             log.info("[yt-dlp] wall hit with impersonate={} — retrying with {}",
-                    firstImpersonate == null ? "(none)" : firstImpersonate, retryTarget);
+                    firstImpersonate == null ? "(none)" : firstImpersonate,
+                    retryImpersonate == null ? "(none)" : retryImpersonate);
             try {
-                String out = runYtDlp(builder.build(new Attempt(retryTarget)));
-                log.info("[yt-dlp] retry succeeded with impersonate={}", retryTarget);
+                String out = runYtDlp(builder.build(new Attempt(retryImpersonate)));
+                log.info("[yt-dlp] retry succeeded with impersonate={}",
+                        retryImpersonate == null ? "(none)" : retryImpersonate);
                 return out;
             } catch (BotChallengeException secondWall) {
                 if (youTubeTarget) {

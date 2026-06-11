@@ -90,10 +90,10 @@ public final class InnertubeClients {
     /**
      * The client used for the search endpoint.
      *
-     * <p>ANDROID_VR is used instead of WEB: the WEB client's search endpoint returns
-     * HTTP 400 through a residential proxy because it requires visitor-data cookies /
-     * a PoToken that we do not carry. ANDROID_VR works without additional auth and
-     * is already proven to route correctly through the proxy.
+     * <p>WEB is used for search: it is the only Innertube client that reliably returns
+     * {@code videoRenderer} results from the search endpoint. ANDROID_VR is a VR
+     * playback client and does not support general-purpose search \u2014 its search
+     * responses contain no {@code videoRenderer} nodes.
      */
-    public static final InnertubeClient SEARCH_CLIENT = ANDROID_VR;
+    public static final InnertubeClient SEARCH_CLIENT = WEB;
 }
