@@ -339,6 +339,7 @@ public final class YtDlpFallback {
         if (process.exitValue() != 0) {
             String detail = stderr.isEmpty() ? "exit " + process.exitValue() : stderr.toString().strip();
             if (isBotWall(detail)) {
+                log.warn("[yt-dlp] Bot wall hit with error detail: {}", detail);
                 throw new BotChallengeException(
                         "YouTube served the bot-detection wall");
             }

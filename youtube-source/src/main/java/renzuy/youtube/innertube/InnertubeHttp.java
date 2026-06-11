@@ -54,7 +54,7 @@ final class InnertubeHttp {
                 .connectTimeout(connectTimeout)
                 .followRedirects(HttpClient.Redirect.NORMAL);
         if (proxy != null) {
-            builder.proxy(ProxySelector.of(new InetSocketAddress(proxy.host(), proxy.port())));
+            builder.proxy(ProxySelector.of(InetSocketAddress.createUnresolved(proxy.host(), proxy.port())));
             if (proxy.hasCredentials()) {
                 allowBasicAuthOverConnect();
                 builder.authenticator(proxyAuthenticator(proxy));
