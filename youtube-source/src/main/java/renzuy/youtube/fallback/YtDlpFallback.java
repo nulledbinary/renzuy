@@ -272,17 +272,28 @@ public final class YtDlpFallback {
     private record Attempt(String impersonateTarget) {}
 
     private String runWithRetry(CommandBuilder builder, boolean youTubeTarget, String describable) {
-        String firstTarget = randomImpersonate(null);
+        // When a proxy is configured, skip --impersonate on the first attempt.
+        // curl_cffi's TLS-fingerprinting stack breaks CONNECT tunnel negotiation
+        // through HTTP proxies (returns 400). Standard curl handles CONNECT fine.
+        // We only promote impersonation to the retry stage if a bot wall is actually
+        // confirmed on the plain first attempt — keeping the defence without the
+        // proxy-incompatibility.
+        boolean hasProxy = !proxy.isBlank();
+        String firstImpersonate = hasProxy ? null : randomImpersonate(null);
         try {
-            String out = runYtDlp(builder.build(new Attempt(firstTarget)));
-            log.debug("[yt-dlp] ok target={} target_for={}", firstTarget, describable);
+            String out = runYtDlp(builder.build(new Attempt(firstImpersonate)));
+            log.debug("[yt-dlp] ok impersonate={} target_for={}",
+                    firstImpersonate == null ? "(none)" : firstImpersonate, describable);
             return out;
         } catch (BotChallengeException firstWall) {
-            String secondTarget = randomImpersonate(firstTarget);
-            log.info("[yt-dlp] wall hit with impersonate={} — retrying with {}", firstTarget, secondTarget);
+            // First attempt hit a wall — retry with an impersonate target regardless
+            // of whether a proxy is present; a real bot wall warrants fingerprinting.
+            String retryTarget = randomImpersonate(firstImpersonate);
+            log.info("[yt-dlp] wall hit with impersonate={} — retrying with {}",
+                    firstImpersonate == null ? "(none)" : firstImpersonate, retryTarget);
             try {
-                String out = runYtDlp(builder.build(new Attempt(secondTarget)));
-                log.info("[yt-dlp] retry succeeded with impersonate={}", secondTarget);
+                String out = runYtDlp(builder.build(new Attempt(retryTarget)));
+                log.info("[yt-dlp] retry succeeded with impersonate={}", retryTarget);
                 return out;
             } catch (BotChallengeException secondWall) {
                 if (youTubeTarget) {
@@ -430,7 +441,13 @@ public final class YtDlpFallback {
             cmd.add("--extractor-args");
             cmd.add("youtubepot-bgutilhttp:base_url=" + potProviderUrl);
         }
-        cmd.add("--impersonate"); cmd.add(attempt.impersonateTarget());
+        // --impersonate uses curl_cffi whose custom TLS stack breaks CONNECT tunnel
+        // negotiation through HTTP proxies (the proxy returns 400).  Only add the
+        // flag when an explicit impersonate target is requested (retry path) — the
+        // proxy itself provides IP diversity, so standard curl is fine for first attempts.
+        if (attempt.impersonateTarget() != null) {
+            cmd.add("--impersonate"); cmd.add(attempt.impersonateTarget());
+        }
         if (!proxy.isBlank()) {
             cmd.add("--proxy"); cmd.add(proxy);
         }

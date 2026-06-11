@@ -87,6 +87,13 @@ public final class InnertubeClients {
      */
     public static final List<InnertubeClient> PLAYER_ROTATION = List.of(ANDROID_VR);
 
-    /** The client used for the search endpoint. */
-    public static final InnertubeClient SEARCH_CLIENT = WEB;
+    /**
+     * The client used for the search endpoint.
+     *
+     * <p>ANDROID_VR is used instead of WEB: the WEB client's search endpoint returns
+     * HTTP 400 through a residential proxy because it requires visitor-data cookies /
+     * a PoToken that we do not carry. ANDROID_VR works without additional auth and
+     * is already proven to route correctly through the proxy.
+     */
+    public static final InnertubeClient SEARCH_CLIENT = ANDROID_VR;
 }
