@@ -151,7 +151,7 @@ public final class ServerLogger extends ListenerAdapter {
                         + " · " + STAMP.format(OffsetDateTime.now()));
 
         if (before != null && !before.content().isBlank()) {
-            b.addField("Before", truncate(before.content(), 900), false);
+            b.addField("Before:", truncate(before.content(), 900), false);
         }
         String now = after.getContentRaw();
         if (!now.isBlank()) {
