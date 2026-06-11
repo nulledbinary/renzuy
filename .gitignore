@@ -21,3 +21,6 @@ Ephemeral.png
 .env.*
 !*.example
 *.local
+
+# Runtime state written by the bot (prefixes, counting game, …)
+config/
