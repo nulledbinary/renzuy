@@ -18,6 +18,8 @@ import net.dv8tion.jda.api.utils.cache.CacheFlag;
 import renzuy.audio.MusicService;
 import renzuy.commands.AfkCommand;
 import renzuy.commands.CommandRegistrar;
+import renzuy.commands.ConfessCommand;
+import renzuy.commands.CountCommand;
 import renzuy.commands.HateWarnCommand;
 import renzuy.commands.HelpCommand;
 import renzuy.commands.InfoCommand;
@@ -35,6 +37,7 @@ import renzuy.commands.TempMuteCommand;
 import renzuy.commands.moderation.UnbanScheduler;
 import renzuy.commands.text.TextCommandRouter;
 import renzuy.config.PrefixStore;
+import renzuy.counting.CountingStore;
 import renzuy.moderation.AutoModerator;
 import renzuy.moderation.HateWarnConfig;
 import renzuy.moderation.RaidGuard;
@@ -53,6 +56,7 @@ public final class Bot {
         PrefixStore prefixes = PrefixStore.defaultLocation();
         UnbanScheduler unbanScheduler = new UnbanScheduler();
         HateWarnConfig hateWarnConfig = HateWarnConfig.defaultLocation();
+        CountingStore countingStore = CountingStore.defaultLocation();
 
         HelpCommand    helpCommand    = new HelpCommand(prefixes);
         PlayCommand    playCommand    = new PlayCommand(music);
@@ -71,6 +75,8 @@ public final class Bot {
         AutoModerator   autoModerator   = new AutoModerator(hateWarnConfig, unbanScheduler);
         RaidGuard       raidGuard       = new RaidGuard();
         TambayCommand   tambayCommand   = new TambayCommand();
+        ConfessCommand  confessCommand  = new ConfessCommand();
+        CountCommand    countCommand    = new CountCommand(countingStore);
 
         SlashCommandData[] commands = {
                 Commands.slash(HelpCommand.NAME, "Show the list of available commands"),
@@ -95,6 +101,9 @@ public final class Bot {
                         .addOption(OptionType.STRING, AfkCommand.REASON_OPTION,
                                 "Reason (optional). Paste an image/GIF URL to display it.", false),
                 Commands.slash(TambayCommand.NAME, "Join the voice channel to idle and chill")
+                        .setDefaultPermissions(DefaultMemberPermissions.enabledFor(Permission.MANAGE_SERVER)),
+                Commands.slash(ConfessCommand.NAME, "Share an anonymous confession via a private form"),
+                Commands.slash(CountCommand.NAME, "Admin: bind this channel as the counting-game channel")
                         .setDefaultPermissions(DefaultMemberPermissions.enabledFor(Permission.MANAGE_SERVER)),
 
                 // ----- moderation -----
@@ -146,7 +155,7 @@ public final class Bot {
                         queueCommand, removeCommand, infoCommand, prefixCommand,
                         purgeCommand, tempMuteCommand, tempBanCommand, logCommand,
                         afkCommand, hateWarnCommand, autoModerator, raidGuard,
-                        tambayCommand, router,
+                        tambayCommand, confessCommand, countCommand, router,
                         new CommandRegistrar(commands))
                 .build()
                 .awaitReady();

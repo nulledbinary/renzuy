@@ -42,7 +42,8 @@ public final class HelpCommand extends ListenerAdapter implements TextCommand {
             new Entry("queue", "Show the queue (paging buttons on slash version)", Capability.EVERYONE),
             new Entry("remove <position>", "Remove a track from the queue by its number", Capability.EVERYONE),
             new Entry("info [user]", "Detailed account / server info for a user", Capability.EVERYONE),
-            new Entry("afk [reason]", "Mark yourself AFK — reason may include an image/GIF URL", Capability.EVERYONE)
+            new Entry("afk [reason]", "Mark yourself AFK — reason may include an image/GIF URL", Capability.EVERYONE),
+            new Entry("confess", "Share an anonymous confession via a private form (slash only)", Capability.EVERYONE)
     );
 
     private static final List<Entry> MANAGEMENT = List.of(
@@ -51,7 +52,8 @@ public final class HelpCommand extends ListenerAdapter implements TextCommand {
             new Entry("tempban <user> <duration>", "Ban with scheduled auto-unban", Capability.BAN_MEMBERS),
             new Entry("log", "Bind this channel as the server event log", Capability.VIEW_LOGS),
             new Entry("hatewarn <count> <punishment>", "Configure warnings threshold + punishment for hate-speech (slash only)", Capability.TIMEOUT_MEMBERS),
-            new Entry("tambay", "Join the voice channel to idle and chill (slash only)", Capability.MANAGE_SERVER)
+            new Entry("tambay", "Join the voice channel to idle and chill (slash only)", Capability.MANAGE_SERVER),
+            new Entry("count", "Bind this channel for the counting game (slash only)", Capability.MANAGE_SERVER)
     );
 
     private static final List<Entry> ADMIN = List.of(
