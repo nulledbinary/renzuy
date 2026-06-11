@@ -3,6 +3,10 @@ package renzuy.youtube.innertube;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.net.Authenticator;
+import java.net.InetSocketAddress;
+import java.net.PasswordAuthentication;
+import java.net.ProxySelector;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -11,6 +15,7 @@ import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import renzuy.youtube.ProxyUrl;
 import renzuy.youtube.YoutubeSourceException;
 
 /**
@@ -33,12 +38,54 @@ final class InnertubeHttp {
     private final Duration requestTimeout;
 
     InnertubeHttp(Duration connectTimeout, Duration requestTimeout) {
+        this(connectTimeout, requestTimeout, null);
+    }
+
+    /**
+     * @param proxy optional forward proxy. When set, every Innertube call, the
+     *              prewarm probe and the CDN stream probe tunnel through it via
+     *              CONNECT — keeping the resolver on the same egress IP that
+     *              googlevideo binds its stream URLs to.
+     */
+    InnertubeHttp(Duration connectTimeout, Duration requestTimeout, ProxyUrl proxy) {
         this.requestTimeout = requestTimeout;
-        this.http = HttpClient.newBuilder()
+        HttpClient.Builder builder = HttpClient.newBuilder()
                 .version(HttpClient.Version.HTTP_2)
                 .connectTimeout(connectTimeout)
-                .followRedirects(HttpClient.Redirect.NORMAL)
-                .build();
+                .followRedirects(HttpClient.Redirect.NORMAL);
+        if (proxy != null) {
+            builder.proxy(ProxySelector.of(new InetSocketAddress(proxy.host(), proxy.port())));
+            if (proxy.hasCredentials()) {
+                allowBasicAuthOverConnect();
+                builder.authenticator(proxyAuthenticator(proxy));
+            }
+            log.info("Innertube transport routed through proxy {}", proxy);
+        }
+        this.http = builder.build();
+    }
+
+    /**
+     * The JDK ships with Basic auth disabled for CONNECT tunnels
+     * ({@code jdk.http.auth.tunneling.disabledSchemes=Basic} in
+     * {@code java.security}), which silently drops the credentials commercial
+     * HTTP proxies require — every request then dies with 407. The override is
+     * read once when the JDK's auth filter class loads, so it must be cleared
+     * before the first proxied client is built. An operator-set value wins.
+     */
+    private static void allowBasicAuthOverConnect() {
+        if (System.getProperty("jdk.http.auth.tunneling.disabledSchemes") == null) {
+            System.setProperty("jdk.http.auth.tunneling.disabledSchemes", "");
+        }
+    }
+
+    private static Authenticator proxyAuthenticator(ProxyUrl proxy) {
+        return new Authenticator() {
+            @Override
+            protected PasswordAuthentication getPasswordAuthentication() {
+                if (getRequestorType() != RequestorType.PROXY) return null;
+                return new PasswordAuthentication(proxy.username(), proxy.password().toCharArray());
+            }
+        };
     }
 
     ObjectMapper mapper() {

@@ -24,12 +24,23 @@ public final class GuildAudioPlayer {
     private final Object lock = new Object();
     private final LinkedList<AudioReference> pending = new LinkedList<>();
     private final LazyResolver lazyResolver;
+    private final String proxyUrl;
 
     private volatile FfmpegStream currentStream;
     private volatile AudioReference currentTrack;
 
     public GuildAudioPlayer(LazyResolver lazyResolver) {
+        this(lazyResolver, "");
+    }
+
+    /**
+     * @param proxyUrl forward proxy for every media fetch, or blank for direct.
+     *                 Must match the proxy the resolver ran through — stream URLs
+     *                 are IP-bound (see {@link FfmpegStream}).
+     */
+    public GuildAudioPlayer(LazyResolver lazyResolver, String proxyUrl) {
         this.lazyResolver = lazyResolver;
+        this.proxyUrl = proxyUrl == null ? "" : proxyUrl;
     }
 
     /** @return {@code true} if playback started now; {@code false} if queued. */
@@ -70,7 +81,7 @@ public final class GuildAudioPlayer {
     }
 
     private void startStream(AudioReference track) throws IOException {
-        currentStream = new FfmpegStream(track.streamUrl(), track.userAgent());
+        currentStream = new FfmpegStream(track.streamUrl(), track.userAgent(), proxyUrl);
         currentTrack = track;
         System.out.println("[Audio] Starting stream: " + track.title());
     }

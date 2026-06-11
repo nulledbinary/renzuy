@@ -7,6 +7,7 @@ import java.util.concurrent.CompletableFuture;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import renzuy.youtube.AudioReference;
+import renzuy.youtube.ProxyUrl;
 import renzuy.youtube.YoutubeSourceException;
 import renzuy.youtube.YoutubeSourceOptions;
 import renzuy.youtube.format.FormatSelector;
@@ -35,7 +36,8 @@ public final class InnertubeResolver {
 
     public InnertubeResolver(YoutubeSourceOptions options) {
         this.options = options;
-        this.http = new InnertubeHttp(options.connectTimeout(), options.requestTimeout());
+        this.http = new InnertubeHttp(options.connectTimeout(), options.requestTimeout(),
+                ProxyUrl.parse(options.proxy()).orElse(null));
     }
 
     /** Opens the HTTP/2 connection to YouTube ahead of the first resolution. */

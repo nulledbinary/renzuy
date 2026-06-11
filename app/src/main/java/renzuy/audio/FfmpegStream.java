@@ -27,6 +27,16 @@ public final class FfmpegStream implements AutoCloseable {
     private long framesProduced = 0;
 
     public FfmpegStream(String streamUrl, String userAgent) throws IOException {
+        this(streamUrl, userAgent, "");
+    }
+
+    /**
+     * @param proxyUrl forward proxy ({@code http://[user:pass@]host:port}) for the
+     *                 media download, or blank for a direct fetch. Must be the same
+     *                 proxy the resolver used: googlevideo URLs are bound to the IP
+     *                 that minted them and 403 from any other egress.
+     */
+    public FfmpegStream(String streamUrl, String userAgent, String proxyUrl) throws IOException {
         String agent = (userAgent == null || userAgent.isBlank()) ? DEFAULT_USER_AGENT : userAgent;
         ProcessBuilder pb = new ProcessBuilder(List.of(
                 Binaries.FFMPEG,
@@ -56,6 +66,12 @@ public final class FfmpegStream implements AutoCloseable {
                 "pipe:1"
         ));
         pb.redirectErrorStream(false);
+        if (proxyUrl != null && !proxyUrl.isBlank()) {
+            // ffmpeg's http/https protocols read the lowercase env var and CONNECT-
+            // tunnel through it. Passed via the environment rather than -http_proxy
+            // so the proxy credentials never appear in `ps` / argv.
+            pb.environment().put("http_proxy", proxyUrl);
+        }
         try {
             this.process = pb.start();
         } catch (IOException e) {
