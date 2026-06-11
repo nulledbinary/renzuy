@@ -133,8 +133,8 @@ public final class HelpCommand extends ListenerAdapter implements TextCommand {
         if (usable.isEmpty()) return;
         StringBuilder body = new StringBuilder(usable.size() * 64);
         for (Entry e : usable) {
-            body.append("`/").append(e.usage()).append("` | `")
-                    .append(prefix).append(e.usage()).append("`\n└ ")
+            body.append("**/").append(e.usage()).append("** | **")
+                    .append(prefix).append(e.usage()).append("**\n└ ")
                     .append(e.description()).append("\n\n");
         }
         b.addField(title, body.toString(), false);

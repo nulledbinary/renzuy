@@ -145,8 +145,6 @@ public final class InfoCommand extends ListenerAdapter implements TextCommand {
         event.getChannel().sendMessageEmbeds(buildEmbed(user, member, guild, profile, latencyMillis)).queue();
     }
 
-    // ---------------- Embed ----------------
-
     private static MessageEmbed buildEmbed(User user, Member member, Guild guild,
                                            User.Profile profile, long latencyMillis) {
         OffsetDateTime created = user.getTimeCreated().withOffsetSameInstant(ZoneOffset.UTC);
