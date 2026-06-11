@@ -18,6 +18,7 @@ import net.dv8tion.jda.api.hooks.ListenerAdapter;
 import net.dv8tion.jda.api.interactions.modals.ModalMapping;
 import net.dv8tion.jda.api.modals.Modal;
 import org.jetbrains.annotations.NotNull;
+import renzuy.confession.ConfessionAudit;
 import renzuy.ui.Embeds;
 
 /**
@@ -29,10 +30,13 @@ import renzuy.ui.Embeds;
  * the bot opens a public thread under the confession so reactions stay in one
  * place; otherwise no thread is created.
  *
- * <p><b>Anonymity:</b> the author is never logged, embedded, or persisted —
- * the only acknowledgement is the ephemeral confirmation that Discord routes
- * back to the submitter. Image URLs must be {@code https} direct image links
- * (or a known image CDN); anything else is dropped rather than rendered.
+ * <p><b>Anonymity:</b> the post itself never identifies the author. For
+ * accountability, each confession is recorded (post ID → author ID) through
+ * {@link ConfessionAudit} and surfaced only to the moderation team in the
+ * bound confession log channel; moderators can warn the author or restrict
+ * them from {@code /confess} from there. Image URLs must be {@code https}
+ * direct image links (or a known image CDN); anything else is dropped rather
+ * than rendered.
  */
 public final class ConfessCommand extends ListenerAdapter {
 
@@ -60,6 +64,12 @@ public final class ConfessCommand extends ListenerAdapter {
             SelectOption.of("Random",  RANDOM_COLOR)
     );
 
+    private final ConfessionAudit audit;
+
+    public ConfessCommand(ConfessionAudit audit) {
+        this.audit = audit;
+    }
+
     // ---------------- /confess → modal ----------------
 
     @Override
@@ -67,6 +77,11 @@ public final class ConfessCommand extends ListenerAdapter {
         if (!event.getName().equals(NAME)) return;
         if (event.getGuild() == null) {
             event.replyEmbeds(Embeds.warn("This command can only be used in a server."))
+                    .setEphemeral(true).queue();
+            return;
+        }
+        if (audit.isRestricted(event.getGuild().getIdLong(), event.getUser().getIdLong())) {
+            event.replyEmbeds(Embeds.error("You have been restricted from using `/confess` by the moderation team."))
                     .setEphemeral(true).queue();
             return;
         }
@@ -78,7 +93,7 @@ public final class ConfessCommand extends ListenerAdapter {
 
         Modal modal = Modal.create(MODAL_ID, "Anonymous Confession")
                 .addComponents(
-                        Label.of("Confession", "Only the confession is posted — never your name.",
+                        Label.of("Confession", "What do you plan on confessing?",
                                 TextInput.create(TEXT_INPUT, TextInputStyle.PARAGRAPH)
                                         .setPlaceholder("What's on your mind?")
                                         .setRequiredRange(1, MAX_CONFESSION_LEN)
@@ -92,8 +107,8 @@ public final class ConfessCommand extends ListenerAdapter {
                         Label.of("Allow replies?",
                                 StringSelectMenu.create(REPLIES_MENU)
                                         .addOptions(
-                                                SelectOption.of("Yes — open a reply thread", "yes").withDefault(true),
-                                                SelectOption.of("No — just post it", "no"))
+                                                SelectOption.of("Yes", "yes").withDefault(true),
+                                                SelectOption.of("No", "no"))
                                         .build()),
                         Label.of("Embed color",
                                 StringSelectMenu.create(COLOR_MENU)
@@ -109,6 +124,11 @@ public final class ConfessCommand extends ListenerAdapter {
     public void onModalInteraction(@NotNull ModalInteractionEvent event) {
         if (!event.getModalId().equals(MODAL_ID)) return;
         if (event.getGuild() == null) return;
+        if (audit.isRestricted(event.getGuild().getIdLong(), event.getUser().getIdLong())) {
+            event.replyEmbeds(Embeds.error("You have been restricted from using `/confess` by the moderation team."))
+                    .setEphemeral(true).queue();
+            return;
+        }
 
         GuildMessageChannel channel = event.getGuildChannel();
         if (!channel.canTalk()) {
@@ -153,6 +173,7 @@ public final class ConfessCommand extends ListenerAdapter {
                 + (allowReplies && !canThread ? "\n⚠️ I lack **Create Public Threads** here, so no reply thread was opened." : "");
 
         channel.sendMessageEmbeds(embed).queue(message -> {
+            audit.record(event.getGuild(), message, event.getUser());
             if (openThread) {
                 message.createThreadChannel("💬 Confession replies")
                         .queue(t -> {}, err -> {});
