@@ -151,11 +151,11 @@ public final class ServerLogger extends ListenerAdapter {
                         + " · " + STAMP.format(OffsetDateTime.now()));
 
         if (before != null && !before.content().isBlank()) {
-            b.addField("Before", "```\n" + truncate(before.content(), 900) + "\n```", false);
+            b.addField("Before", truncate(before.content(), 900), false);
         }
         String now = after.getContentRaw();
         if (!now.isBlank()) {
-            b.addField("After", "```\n" + truncate(now, 900) + "\n```", false);
+            b.addField("After", truncate(now, 900), false);
         }
         b.addField("Jump", "[Open in channel](" + after.getJumpUrl() + ")", false);
 
@@ -180,8 +180,8 @@ public final class ServerLogger extends ListenerAdapter {
         StringBuilder desc = new StringBuilder();
         desc.append("**Channel:** <#").append(event.getChannel().getId()).append('>');
         if (cached != null) {
-            desc.append("\n**Author:** <@").append(cached.authorId()).append("> (`")
-                    .append(cached.authorTag()).append("`)");
+            desc.append("\n**Author:** <@").append(cached.authorId()).append("> (")
+                    .append(cached.authorTag()).append(")");
             desc.append("\n**Sent:** <t:").append(cached.createdAt().toEpochSecond()).append(":f>");
         } else {
             desc.append("\n_(content not cached — message predates the bot's current uptime)_");
@@ -192,7 +192,7 @@ public final class ServerLogger extends ListenerAdapter {
 
         if (cached != null) {
             if (!cached.content().isBlank()) {
-                b.addField("Content", "```\n" + truncate(cached.content(), 1000) + "\n```", false);
+                b.addField("Content", truncate(cached.content(), 1000), false);
                 String firstLink = firstUrl(cached.content());
                 if (firstLink != null) {
                     b.addField("First link", firstLink, false);
@@ -249,8 +249,8 @@ public final class ServerLogger extends ListenerAdapter {
                 .setAuthor("Member joined", null, m.getUser().getEffectiveAvatarUrl())
                 .setThumbnail(m.getUser().getEffectiveAvatarUrl())
                 .setDescription(m.getAsMention() + " joined the server.")
-                .addField("Tag", "`" + m.getUser().getAsTag() + "`", true)
-                .addField("ID", "`" + m.getId() + "`", true)
+                .addField("Tag", m.getUser().getAsTag(), true)
+                .addField("ID", m.getId(), true)
                 .addField("Account age", ageDays + " days", true)
                 .setFooter(STAMP.format(OffsetDateTime.now()))
                 .build();
@@ -264,7 +264,7 @@ public final class ServerLogger extends ListenerAdapter {
                 .setColor(C_DELETE)
                 .setAuthor("Member left", null, u.getEffectiveAvatarUrl())
                 .setThumbnail(u.getEffectiveAvatarUrl())
-                .setDescription("**" + u.getAsTag() + "** (`" + u.getId() + "`) left or was removed.")
+                .setDescription("**" + u.getAsTag() + "** (" + u.getId() + ") left or was removed.")
                 .setFooter(STAMP.format(OffsetDateTime.now()))
                 .build();
         post(event.getGuild(), LogCategory.MEMBER_LEAVE, embed);
@@ -278,8 +278,8 @@ public final class ServerLogger extends ListenerAdapter {
                 .setColor(C_UPDATE)
                 .setAuthor("Nickname changed", null, event.getUser().getEffectiveAvatarUrl())
                 .setDescription(event.getUser().getAsMention() + " changed nickname.")
-                .addField("Before", "`" + before + "`", true)
-                .addField("After", "`" + after + "`", true)
+                .addField("Before", before, true)
+                .addField("After", after, true)
                 .setFooter(STAMP.format(OffsetDateTime.now()))
                 .build();
         post(event.getGuild(), LogCategory.NICKNAME, embed);
@@ -307,19 +307,19 @@ public final class ServerLogger extends ListenerAdapter {
             String reason = entries.stream().findFirst()
                     .map(AuditLogEntry::getReason)
                     .orElse(null);
-            String body = "**" + event.getUser().getAsTag() + "** (`" + event.getUser().getId()
-                    + "`) was banned.\nBy: " + moderator
+            String body = "**" + event.getUser().getAsTag() + "** (" + event.getUser().getId()
+                    + ") was banned.\nBy: " + moderator
                     + (reason == null ? "" : "\nReason: " + reason);
             post(guild, LogCategory.BAN, event(C_DELETE, "User banned", body));
         }, err -> {
-            String body = "**" + event.getUser().getAsTag() + "** (`" + event.getUser().getId() + "`) was banned.";
+            String body = "**" + event.getUser().getAsTag() + "** (" + event.getUser().getId() + ") was banned.";
             post(guild, LogCategory.BAN, event(C_DELETE, "User banned", body));
         });
     }
 
     @Override
     public void onGuildUnban(@NotNull GuildUnbanEvent event) {
-        String body = "**" + event.getUser().getAsTag() + "** (`" + event.getUser().getId() + "`) was unbanned.";
+        String body = "**" + event.getUser().getAsTag() + "** (" + event.getUser().getId() + ") was unbanned.";
         post(event.getGuild(), LogCategory.UNBAN, event(C_CREATE, "User unbanned", body));
     }
 

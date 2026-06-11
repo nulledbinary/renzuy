@@ -16,10 +16,14 @@ import java.time.Duration;
  *                        {@code --cookies}; blank/null disables. One of three
  *                        mitigations for the "Sign in to confirm you're not a bot"
  *                        wall on datacenter IPs.
- * @param ytDlpProxy      proxy URL passed to yt-dlp via {@code --proxy}; blank/null
- *                        disables. Typically a residential SOCKS5/HTTPS endpoint;
- *                        the silver bullet for the bot wall since it masks the
- *                        datacenter ASN entirely.
+ * @param proxy           forward-proxy URL ({@code http://[user:pass@]host:port},
+ *                        see {@link ProxyUrl}) for every YouTube hop: Innertube
+ *                        calls and stream probes tunnel through it, and yt-dlp
+ *                        receives it via {@code --proxy}. Blank/null disables.
+ *                        The caller must route its media download (ffmpeg)
+ *                        through the same proxy — googlevideo URLs are bound to
+ *                        the IP that minted them. The silver bullet for the bot
+ *                        wall since it masks the datacenter ASN entirely.
  * @param ytDlpPoToken    GVS PoToken passed via {@code --extractor-args
  *                        youtube:po_token=mweb.gvs+TOKEN}; blank/null disables.
  *                        Lasts roughly 24 h before YouTube rotates it.
@@ -46,7 +50,7 @@ public record YoutubeSourceOptions(
         boolean fallbackEnabled,
         String ytDlpPath,
         String ytDlpCookiesPath,
-        String ytDlpProxy,
+        String proxy,
         String ytDlpPoToken,
         String ytDlpPotProviderUrl,
         String ipv6Block,
@@ -70,7 +74,7 @@ public record YoutubeSourceOptions(
         private boolean fallbackEnabled = true;
         private String ytDlpPath = "yt-dlp";
         private String ytDlpCookiesPath = "";
-        private String ytDlpProxy = "";
+        private String proxy = "";
         private String ytDlpPoToken = "";
         private String ytDlpPotProviderUrl = "";
         private String ipv6Block = "";
@@ -84,7 +88,7 @@ public record YoutubeSourceOptions(
         public Builder fallbackEnabled(boolean v) { this.fallbackEnabled = v; return this; }
         public Builder ytDlpPath(String v) { this.ytDlpPath = v; return this; }
         public Builder ytDlpCookiesPath(String v) { this.ytDlpCookiesPath = v == null ? "" : v; return this; }
-        public Builder ytDlpProxy(String v) { this.ytDlpProxy = v == null ? "" : v; return this; }
+        public Builder proxy(String v) { this.proxy = v == null ? "" : v; return this; }
         public Builder ytDlpPoToken(String v) { this.ytDlpPoToken = v == null ? "" : v; return this; }
         public Builder ytDlpPotProviderUrl(String v) { this.ytDlpPotProviderUrl = v == null ? "" : v; return this; }
         public Builder ipv6Block(String v) { this.ipv6Block = v == null ? "" : v; return this; }
@@ -94,7 +98,7 @@ public record YoutubeSourceOptions(
         public YoutubeSourceOptions build() {
             return new YoutubeSourceOptions(
                     connectTimeout, requestTimeout, cacheTtl, cacheMaxEntries,
-                    fallbackEnabled, ytDlpPath, ytDlpCookiesPath, ytDlpProxy, ytDlpPoToken,
+                    fallbackEnabled, ytDlpPath, ytDlpCookiesPath, proxy, ytDlpPoToken,
                     ytDlpPotProviderUrl, ipv6Block, verifyStreamUrl, prewarmOnStart);
         }
     }

@@ -43,7 +43,7 @@ public final class YoutubeSource {
         this.fallback = new YtDlpFallback(
                 options.ytDlpPath(),
                 options.ytDlpCookiesPath(),
-                options.ytDlpProxy(),
+                options.proxy(),
                 options.ytDlpPoToken(),
                 options.ytDlpPotProviderUrl(),
                 options.ipv6Block());
